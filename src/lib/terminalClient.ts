@@ -5,6 +5,7 @@ interface ClientCallbacks {
   onCreated(paneId: string, sessionId: string): void;
   onExit(paneId: string, exitCode: number): void;
   onError(paneId: string | undefined, message: string): void;
+  onDisconnected(): void;
 }
 
 interface ControlMessage {
@@ -45,10 +46,27 @@ export class TerminalClient {
       socket.onopen = () => resolve();
       socket.onerror = () => reject(new Error("无法连接本机终端服务"));
       socket.onmessage = (event) => this.receive(event.data as string | ArrayBuffer);
-      socket.onclose = () => this.callbacks.onError(undefined, "终端服务连接已断开");
+      socket.onclose = () => this.handleDisconnect(socket);
       this.socket = socket;
     });
     return this.connected;
+  }
+
+  // 连接断开后清空全部会话状态：后端会在下一个连接建立时回收旧会话，
+  // 这里同步丢弃映射、未完成请求和批处理队列，让每个窗格可以重新创建会话。
+  private handleDisconnect(socket: WebSocket): void {
+    if (this.socket !== socket) return;
+    this.socket = undefined;
+    this.connected = undefined;
+    this.sessions.clear();
+    this.panesBySession.clear();
+    this.requests.clear();
+    this.pendingOutput.clear();
+    for (const queue of this.queues.values()) {
+      if (queue.timer !== undefined) window.clearTimeout(queue.timer);
+    }
+    this.queues.clear();
+    this.callbacks.onDisconnected();
   }
 
   async create(paneId: string, launch: PaneLaunchInfo, cols: number, rows: number): Promise<void> {
@@ -90,7 +108,11 @@ export class TerminalClient {
       this.sendJson({ type: "close", sessionId });
       this.sessions.delete(paneId);
       this.panesBySession.delete(sessionId);
+      this.pendingOutput.delete(sessionId);
     }
+    const queue = this.queues.get(paneId);
+    if (queue?.timer !== undefined) window.clearTimeout(queue.timer);
+    this.queues.delete(paneId);
   }
 
   isRunning(paneId: string): boolean {
@@ -115,6 +137,7 @@ export class TerminalClient {
           for (const chunk of pending) this.enqueue(message.paneId, chunk);
         }
       } else if (message.type === "exit" && message.sessionId) {
+        this.pendingOutput.delete(message.sessionId);
         const paneId = this.panesBySession.get(message.sessionId);
         if (paneId) {
           this.sessions.delete(paneId);
@@ -122,6 +145,7 @@ export class TerminalClient {
           this.callbacks.onExit(paneId, message.exitCode ?? 0);
         }
       } else if (message.type === "error") {
+        if (message.sessionId) this.pendingOutput.delete(message.sessionId);
         const paneId = message.sessionId ? this.panesBySession.get(message.sessionId) : undefined;
         if (message.requestId) this.requests.delete(message.requestId);
         this.callbacks.onError(paneId, message.message ?? "终端服务发生未知错误");

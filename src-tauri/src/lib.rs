@@ -39,7 +39,10 @@ fn get_bootstrap(state: tauri::State<'_, RuntimeState>) -> Bootstrap {
 }
 
 #[tauri::command]
-fn save_workspace(state: tauri::State<'_, RuntimeState>, workspace: WorkspaceStateV1) -> Result<(), String> {
+fn save_workspace(
+    state: tauri::State<'_, RuntimeState>,
+    workspace: WorkspaceStateV1,
+) -> Result<(), String> {
     workspace::save(&state.workspace_path, &workspace)
 }
 
@@ -73,8 +76,13 @@ fn environment() -> EnvironmentStatus {
 }
 
 fn find_pwsh() -> Option<String> {
-    let output = std::process::Command::new("where.exe").arg("pwsh.exe").output().ok()?;
-    if !output.status.success() { return None; }
+    let output = std::process::Command::new("where.exe")
+        .arg("pwsh.exe")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(str::trim)
@@ -87,7 +95,10 @@ pub fn run() {
         .setup(|app| {
             let environment = environment();
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("C:\\"));
-            let shell = environment.pwsh_path.clone().unwrap_or_else(|| "pwsh.exe".into());
+            let shell = environment
+                .pwsh_path
+                .clone()
+                .unwrap_or_else(|| "pwsh.exe".into());
             let workspace_path = workspace::workspace_path();
             let fallback = WorkspaceStateV1::default_at(&cwd, shell);
             let workspace = workspace::load_or_default(&workspace_path, fallback);
@@ -99,15 +110,26 @@ pub fn run() {
                 token: terminal.token().to_owned(),
                 environment,
             };
-            app.manage(RuntimeState { bootstrap, workspace_path, terminal });
+            app.manage(RuntimeState {
+                bootstrap,
+                workspace_path,
+                terminal,
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_bootstrap, save_workspace, open_external])
+        .invoke_handler(tauri::generate_handler![
+            get_bootstrap,
+            save_workspace,
+            open_external
+        ])
         .build(tauri::generate_context!())
         .expect("failed to build CliMultiple");
 
     application.run(|handle, event| {
-        if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
             handle.state::<RuntimeState>().terminal.close_all();
         }
     });

@@ -22,6 +22,7 @@ interface RegistryCallbacks {
 }
 
 const terminals = new Map<string, RegisteredTerminal>();
+const renderers = new Map<string, { webgl: boolean }>();
 let webglContexts = 0;
 const MAX_WEBGL_CONTEXTS = 4;
 
@@ -76,15 +77,21 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   const container = document.createElement("div");
   container.className = "terminal-surface";
   terminal.open(container);
+  // 记录本实例是否占用了一个 WebGL 上下文，释放（dispose 或上下文丢失）时归还配额。
+  const renderer = { webgl: false };
   if (webglContexts < MAX_WEBGL_CONTEXTS) {
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
         webgl.dispose();
-        webglContexts = Math.max(0, webglContexts - 1);
+        if (renderer.webgl) {
+          renderer.webgl = false;
+          webglContexts = Math.max(0, webglContexts - 1);
+        }
       });
       terminal.loadAddon(webgl);
       webglContexts += 1;
+      renderer.webgl = true;
     } catch {
       // xterm's built-in DOM renderer remains active.
     }
@@ -115,6 +122,7 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
     },
   };
   terminals.set(paneId, registered);
+  renderers.set(paneId, renderer);
   return registered;
 }
 
@@ -143,4 +151,10 @@ export function disposeTerminal(paneId: string): void {
   entry.terminal.dispose();
   entry.container.remove();
   terminals.delete(paneId);
+  const renderer = renderers.get(paneId);
+  renderers.delete(paneId);
+  if (renderer?.webgl) {
+    renderer.webgl = false;
+    webglContexts = Math.max(0, webglContexts - 1);
+  }
 }

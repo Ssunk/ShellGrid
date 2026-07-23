@@ -7,7 +7,7 @@
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { TerminalClient } from "./lib/terminalClient";
-  import { disposeTerminal, fitTerminal, getTerminal } from "./lib/terminalRegistry";
+  import { disposeTerminal, fitTerminal, getTerminal, terminalSize } from "./lib/terminalRegistry";
   import type { Bootstrap, EnvironmentStatus, SessionState, WorkspaceStateV1 } from "./lib/types";
 
   const defaultPaneId = "local-pane";
@@ -33,6 +33,7 @@
   let showInfo = false;
   let nextPaneNumber = 2;
   let saveTimer = 0;
+  let reconnectTimer = 0;
   let unlistenClose: (() => void) | undefined;
 
   const controller: AppController = {
@@ -77,7 +78,10 @@
 
   onMount(() => {
     void initialize();
-    return () => { unlistenClose?.(); };
+    return () => {
+      unlistenClose?.();
+      window.clearTimeout(reconnectTimer);
+    };
   });
 
   async function initialize(): Promise<void> {
@@ -97,6 +101,13 @@
         onError: (paneId, message) => {
           errorMessage = message;
           if (paneId) sessions = { ...sessions, [paneId]: { paneId, running: false, error: message } };
+        },
+        onDisconnected: () => {
+          errorMessage = "终端服务连接已断开，正在重连...";
+          sessions = Object.fromEntries(
+            Object.entries(sessions).map(([paneId, session]) => [paneId, { ...session, running: false }]),
+          );
+          scheduleReconnect();
         },
       });
       await terminalClient.connect();
@@ -118,6 +129,26 @@
     });
   }
 
+  function scheduleReconnect(): void {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = window.setTimeout(() => void reconnect(), 1000);
+  }
+
+  async function reconnect(): Promise<void> {
+    if (!terminalClient) return;
+    try {
+      await terminalClient.connect();
+    } catch {
+      scheduleReconnect();
+      return;
+    }
+    errorMessage = "";
+    for (const paneId of paneIds(workspace.layout)) {
+      const size = terminalSize(paneId);
+      void terminalClient.create(paneId, controller.getLaunch(paneId), size?.cols ?? 80, size?.rows ?? 24);
+    }
+  }
+
   function split(paneId: string, direction: "horizontal" | "vertical"): void {
     const ids = paneIds(workspace.layout);
     if (ids.length >= MAX_PANES) {
@@ -135,12 +166,16 @@
   }
 
   function close(paneId: string): void {
+    // 先确认布局允许关闭（最后一个窗格不可关），再销毁会话与终端实例。
+    const nextLayout = closePane(workspace.layout, paneId);
+    if (!nextLayout) {
+      errorMessage = "至少需要保留一个窗格";
+      return;
+    }
     const session = sessions[paneId];
     if (session?.running && !window.confirm("关闭此窗格会终止其中的进程，确定继续吗？")) return;
     terminalClient?.closePane(paneId);
     disposeTerminal(paneId);
-    const nextLayout = closePane(workspace.layout, paneId);
-    if (!nextLayout) return;
     const { [paneId]: _, ...remainingPanes } = workspace.panes;
     workspace = { ...workspace, layout: nextLayout, panes: remainingPanes };
     const { [paneId]: _closedSession, ...remainingSessions } = sessions;
@@ -171,7 +206,8 @@
   }
 
   function handleShortcut(event: KeyboardEvent): void {
-    if (!event.ctrlKey || !event.altKey) return;
+    // 使用 Ctrl+Shift 组合；Ctrl+Alt 在部分键盘布局上等价于 AltGr，会拦截正常字符输入。
+    if (!event.ctrlKey || !event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === "h") createFromToolbar("horizontal");
     else if (key === "v") createFromToolbar("vertical");
@@ -192,8 +228,8 @@
   <header class="topbar">
     <div class="brand"><SquareTerminal size={18} /><span>CliMultiple</span><small>工作区</small></div>
     <div class="toolbar-group">
-      <button class="toolbar-button" title="左右分割 (Ctrl+Alt+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割</button>
-      <button class="toolbar-button" title="上下分割 (Ctrl+Alt+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割</button>
+      <button class="toolbar-button" title="左右分割 (Ctrl+Shift+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割</button>
+      <button class="toolbar-button" title="上下分割 (Ctrl+Shift+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割</button>
       <button class="toolbar-button" title="保存工作区" on:click={() => void persist()}><Save size={16} />保存</button>
     </div>
     <div class="toolbar-spacer"></div>

@@ -153,10 +153,19 @@ fn preserve_corrupt(path: &Path) {
 #[cfg(windows)]
 fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
-    use windows::{core::PCWSTR, Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH}};
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        },
+    };
 
     let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination_wide: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     unsafe {
         MoveFileExW(
             PCWSTR(source_wide.as_ptr()),
@@ -204,9 +213,11 @@ mod tests {
         let expected = fallback();
         assert_eq!(load_or_default(&path, expected.clone()), expected);
         assert!(!path.exists());
-        assert!(fs::read_dir(directory.path())
+        assert!(fs::read_dir(directory.path()).unwrap().any(|entry| entry
             .unwrap()
-            .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with("workspace.corrupt-")));
+            .file_name()
+            .to_string_lossy()
+            .starts_with("workspace.corrupt-")));
     }
 
     #[test]
@@ -215,7 +226,12 @@ mod tests {
         for index in 0..MAX_PANES {
             state.panes.insert(
                 format!("extra-{index}"),
-                PaneLaunchInfo { cwd: "C:\\".into(), title: None, shell: "pwsh.exe".into(), args: vec![] },
+                PaneLaunchInfo {
+                    cwd: "C:\\".into(),
+                    title: None,
+                    shell: "pwsh.exe".into(),
+                    args: vec![],
+                },
             );
         }
         // Unreferenced launch records do not alter the live layout.

@@ -1,12 +1,15 @@
 use crate::job::Job;
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Query, State,
+    },
     response::Response,
     routing::get,
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use rand::{distr::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,16 +18,20 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, Weak},
     thread,
-    time::Duration,
 };
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
 const OUTPUT_CHUNK_SIZE: usize = 16 * 1024;
 const SESSION_QUEUE_DEPTH: usize = 64;
+const INPUT_QUEUE_DEPTH: usize = 128;
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 enum ClientMessage {
     Create {
         request_id: String,
@@ -35,17 +42,41 @@ enum ClientMessage {
         cols: u16,
         rows: u16,
     },
-    Resize { session_id: Uuid, cols: u16, rows: u16 },
-    SetPriority { session_id: Uuid, focused: bool },
-    Close { session_id: Uuid },
+    Resize {
+        session_id: Uuid,
+        cols: u16,
+        rows: u16,
+    },
+    SetPriority {
+        session_id: Uuid,
+        focused: bool,
+    },
+    Close {
+        session_id: Uuid,
+    },
 }
 
 #[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 enum ServerMessage<'a> {
-    Created { request_id: &'a str, pane_id: &'a str, session_id: Uuid },
-    Exit { session_id: Uuid, exit_code: u32 },
-    Error { request_id: Option<&'a str>, session_id: Option<Uuid>, message: &'a str },
+    Created {
+        request_id: &'a str,
+        pane_id: &'a str,
+        session_id: Uuid,
+    },
+    Exit {
+        session_id: Uuid,
+        exit_code: u32,
+    },
+    Error {
+        request_id: Option<&'a str>,
+        session_id: Option<Uuid>,
+        message: &'a str,
+    },
 }
 
 #[derive(Clone)]
@@ -55,28 +86,32 @@ enum ServerFrame {
 }
 
 struct Hub {
-    client: RwLock<Option<mpsc::Sender<ServerFrame>>>,
+    client: watch::Sender<Option<mpsc::Sender<ServerFrame>>>,
 }
 
 impl Hub {
     fn new() -> Self {
-        Self { client: RwLock::new(None) }
+        let (client, _) = watch::channel(None);
+        Self { client }
     }
 
-    async fn attach(&self, sender: mpsc::Sender<ServerFrame>) {
-        *self.client.write().await = Some(sender);
+    fn attach(&self, sender: mpsc::Sender<ServerFrame>) {
+        self.client.send_replace(Some(sender));
     }
 
     async fn send(&self, frame: ServerFrame) {
+        let mut receiver = self.client.subscribe();
         loop {
-            let client = self.client.read().await.clone();
+            let client = receiver.borrow_and_update().clone();
             if let Some(client) = client {
                 if client.send(frame.clone()).await.is_ok() {
                     return;
                 }
-                *self.client.write().await = None;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // 没有前端连接时挂起等待，attach 时被唤醒；watch 关闭说明服务已停止。
+            if receiver.changed().await.is_err() {
+                return;
+            }
         }
     }
 
@@ -87,14 +122,14 @@ impl Hub {
     }
 }
 
-type ChildHandle = Arc<Mutex<Box<dyn Child + Send + Sync>>>;
-
 struct Session {
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    input: mpsc::Sender<Vec<u8>>,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    child: ChildHandle,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     _job: Job,
 }
+
+type SpawnedSession = (Uuid, Box<dyn Read + Send>, Box<dyn Child + Send + Sync>);
 
 pub struct TerminalServer {
     token: String,
@@ -129,9 +164,13 @@ impl TerminalServer {
         Ok(server)
     }
 
-    pub fn token(&self) -> &str { &self.token }
+    pub fn token(&self) -> &str {
+        &self.token
+    }
 
-    pub fn url(&self) -> &str { &self.url }
+    pub fn url(&self) -> &str {
+        &self.url
+    }
 
     fn create(
         self: &Arc<Self>,
@@ -140,19 +179,28 @@ impl TerminalServer {
         args: &[String],
         cols: u16,
         rows: u16,
-    ) -> Result<Uuid, String> {
+    ) -> Result<SpawnedSession, String> {
         if !Path::new(cwd).is_dir() {
             return Err(format!("启动目录不存在：{cwd}"));
         }
         let pair = native_pty_system()
-            .openpty(PtySize { rows: rows.max(1), cols: cols.max(1), pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|error| format!("无法创建 ConPTY：{error}"))?;
         let mut command = CommandBuilder::new(shell);
         command.cwd(cwd);
         for argument in args {
             command.arg(argument);
         }
-        if is_pwsh(shell) && !args.iter().any(|value| value.eq_ignore_ascii_case("-Command")) {
+        if is_pwsh(shell)
+            && !args
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case("-Command"))
+        {
             command.arg("-NoExit");
             command.arg("-Command");
             command.arg(shell_integration());
@@ -170,20 +218,26 @@ impl TerminalServer {
             let _ = child.kill();
             format!("无法创建进程回收 Job Object：{error}")
         })?;
-        let reader = pair.master.try_clone_reader().map_err(|error| error.to_string())?;
-        let writer = pair.master.take_writer().map_err(|error| error.to_string())?;
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|error| error.to_string())?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|error| error.to_string())?;
         let session_id = Uuid::new_v4();
-        let child = Arc::new(Mutex::new(child));
         let session = Session {
-            writer: Arc::new(Mutex::new(writer)),
+            input: spawn_input_writer(writer),
             master: Arc::new(Mutex::new(pair.master)),
-            child: child.clone(),
+            killer: Mutex::new(child.clone_killer()),
             _job: job,
         };
-        self.sessions.lock().map_err(|_| "会话表已损坏")?.insert(session_id, session);
-        self.spawn_output(session_id, reader);
-        self.spawn_exit_watcher(session_id, child);
-        Ok(session_id)
+        self.sessions
+            .lock()
+            .map_err(|_| "会话表已损坏")?
+            .insert(session_id, session);
+        Ok((session_id, reader, child))
     }
 
     fn spawn_output(self: &Arc<Self>, session_id: Uuid, mut reader: Box<dyn Read + Send>) {
@@ -210,65 +264,112 @@ impl TerminalServer {
         });
     }
 
-    fn spawn_exit_watcher(self: &Arc<Self>, session_id: Uuid, child: ChildHandle) {
+    fn spawn_exit_watcher(
+        self: &Arc<Self>,
+        session_id: Uuid,
+        mut child: Box<dyn Child + Send + Sync>,
+    ) {
         let sessions: Weak<Mutex<HashMap<Uuid, Session>>> = Arc::downgrade(&self.sessions);
         let hub = self.hub.clone();
-        thread::spawn(move || loop {
-            let status = child.lock().ok().and_then(|mut child| child.try_wait().ok()).flatten();
-            if let Some(status) = status {
-                if let Some(sessions) = sessions.upgrade() {
-                    if let Ok(mut sessions) = sessions.lock() {
-                        sessions.remove(&session_id);
-                    }
+        thread::spawn(move || {
+            let exit_code = child.wait().map_or(1, |status| status.exit_code());
+            if let Some(sessions) = sessions.upgrade() {
+                if let Ok(mut sessions) = sessions.lock() {
+                    sessions.remove(&session_id);
                 }
-                let exit_code = status.exit_code();
-                tauri::async_runtime::spawn(async move {
-                    hub.json(&ServerMessage::Exit { session_id, exit_code }).await;
-                });
-                break;
             }
-            thread::sleep(Duration::from_millis(100));
+            tauri::async_runtime::spawn(async move {
+                hub.json(&ServerMessage::Exit {
+                    session_id,
+                    exit_code,
+                })
+                .await;
+            });
         });
     }
 
-    fn input(&self, session_id: Uuid, bytes: &[u8]) -> Result<(), String> {
-        let sessions = self.sessions.lock().map_err(|_| "会话表已损坏")?;
-        let session = sessions.get(&session_id).ok_or("终端会话不存在")?;
-        let mut writer = session.writer.lock().map_err(|_| "终端输入流已损坏")?;
-        writer.write_all(bytes).map_err(|error| error.to_string())?;
-        writer.flush().map_err(|error| error.to_string())
+    async fn input(&self, session_id: Uuid, bytes: &[u8]) -> Result<(), String> {
+        let sender = {
+            let sessions = self.sessions.lock().map_err(|_| "会话表已损坏")?;
+            sessions
+                .get(&session_id)
+                .ok_or("终端会话不存在")?
+                .input
+                .clone()
+        };
+        sender
+            .send(bytes.to_vec())
+            .await
+            .map_err(|_| "终端输入流已关闭".to_string())
     }
 
     fn resize(&self, session_id: Uuid, cols: u16, rows: u16) -> Result<(), String> {
-        let sessions = self.sessions.lock().map_err(|_| "会话表已损坏")?;
-        let session = sessions.get(&session_id).ok_or("终端会话不存在")?;
-        let result = session
-            .master
+        let master = {
+            let sessions = self.sessions.lock().map_err(|_| "会话表已损坏")?;
+            sessions
+                .get(&session_id)
+                .ok_or("终端会话不存在")?
+                .master
+                .clone()
+        };
+        let result = master
             .lock()
             .map_err(|_| "ConPTY 句柄已损坏")?
-            .resize(PtySize { rows: rows.max(1), cols: cols.max(1), pixel_width: 0, pixel_height: 0 })
+            .resize(PtySize {
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|error| error.to_string());
         result
     }
 
     fn close(&self, session_id: Uuid) -> Result<(), String> {
-        let session = self.sessions.lock().map_err(|_| "会话表已损坏")?.remove(&session_id);
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| "会话表已损坏")?
+            .remove(&session_id);
         if let Some(session) = session {
-            session.child.lock().map_err(|_| "终端进程句柄已损坏")?.kill().map_err(|error| error.to_string())?;
+            // kill 与进程自行退出存在竞态，可能返回诸如 "os error 0" 的虚假错误；
+            // 无论 kill 结果如何，Session 释放时 Job Object 都会回收整棵进程树，无需上报。
+            if let Ok(mut killer) = session.killer.lock() {
+                let _ = killer.kill();
+            }
         }
         Ok(())
     }
 
     pub fn close_all(&self) {
-        let sessions = self.sessions.lock().ok().map(|mut value| value.drain().map(|(_, session)| session).collect::<Vec<_>>());
+        let sessions = self.sessions.lock().ok().map(|mut value| {
+            value
+                .drain()
+                .map(|(_, session)| session)
+                .collect::<Vec<_>>()
+        });
         if let Some(sessions) = sessions {
             for session in sessions {
-                if let Ok(mut child) = session.child.lock() {
-                    let _ = child.kill();
+                if let Ok(mut killer) = session.killer.lock() {
+                    let _ = killer.kill();
                 }
             }
         }
     }
+}
+
+// 每个会话独立的写线程：input() 只做异步入队，阻塞的 ConPTY 写入不会占用全局会话锁，
+// 且同一会话的输入顺序由单线程保证。
+fn spawn_input_writer(mut writer: Box<dyn Write + Send>) -> mpsc::Sender<Vec<u8>> {
+    let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE_DEPTH);
+    thread::spawn(move || {
+        while let Some(bytes) = receiver.blocking_recv() {
+            if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                break;
+            }
+        }
+    });
+    sender
 }
 
 fn is_pwsh(shell: &str) -> bool {
@@ -282,7 +383,9 @@ fn shell_integration() -> &'static str {
 }
 
 #[derive(Deserialize)]
-struct AuthQuery { token: String }
+struct AuthQuery {
+    token: String,
+}
 
 async fn websocket_handler(
     State(server): State<Arc<TerminalServer>>,
@@ -296,16 +399,20 @@ async fn websocket_handler(
 }
 
 async fn socket_loop(server: Arc<TerminalServer>, socket: WebSocket) {
+    // 每个连接对应一份全新的前端会话状态；旧连接遗留的会话已无人认领，先回收其进程。
+    server.close_all();
     let (mut socket_sender, mut socket_receiver) = socket.split();
     let (sender, mut receiver) = mpsc::channel::<ServerFrame>(256);
-    server.hub.attach(sender).await;
+    server.hub.attach(sender);
     let writer = tauri::async_runtime::spawn(async move {
         while let Some(frame) = receiver.recv().await {
             let message = match frame {
                 ServerFrame::Text(text) => Message::Text(text.into()),
                 ServerFrame::Binary(bytes) => Message::Binary(bytes.into()),
             };
-            if socket_sender.send(message).await.is_err() { break; }
+            if socket_sender.send(message).await.is_err() {
+                break;
+            }
         }
     });
 
@@ -324,38 +431,113 @@ async fn handle_control(server: &Arc<TerminalServer>, text: &str) {
     let message = match serde_json::from_str::<ClientMessage>(text) {
         Ok(message) => message,
         Err(error) => {
-            server.hub.json(&ServerMessage::Error { request_id: None, session_id: None, message: &format!("无效控制消息：{error}") }).await;
+            server
+                .hub
+                .json(&ServerMessage::Error {
+                    request_id: None,
+                    session_id: None,
+                    message: &format!("无效控制消息：{error}"),
+                })
+                .await;
             return;
         }
     };
     match message {
-        ClientMessage::Create { request_id, pane_id, cwd, shell, args, cols, rows } => {
-            match server.create(&cwd, &shell, &args, cols, rows) {
-                Ok(session_id) => server.hub.json(&ServerMessage::Created { request_id: &request_id, pane_id: &pane_id, session_id }).await,
-                Err(message) => server.hub.json(&ServerMessage::Error { request_id: Some(&request_id), session_id: None, message: &message }).await,
+        ClientMessage::Create {
+            request_id,
+            pane_id,
+            cwd,
+            shell,
+            args,
+            cols,
+            rows,
+        } => {
+            let spawner = server.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                spawner.create(&cwd, &shell, &args, cols, rows)
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|value| value);
+            match result {
+                Ok((session_id, reader, child)) => {
+                    // 先送出 Created 再启动输出转发，保证前端在收到任何输出前已建立会话映射。
+                    server
+                        .hub
+                        .json(&ServerMessage::Created {
+                            request_id: &request_id,
+                            pane_id: &pane_id,
+                            session_id,
+                        })
+                        .await;
+                    server.spawn_output(session_id, reader);
+                    server.spawn_exit_watcher(session_id, child);
+                }
+                Err(message) => {
+                    server
+                        .hub
+                        .json(&ServerMessage::Error {
+                            request_id: Some(&request_id),
+                            session_id: None,
+                            message: &message,
+                        })
+                        .await
+                }
             }
         }
-        ClientMessage::Resize { session_id, cols, rows } => {
+        ClientMessage::Resize {
+            session_id,
+            cols,
+            rows,
+        } => {
             if let Err(message) = server.resize(session_id, cols, rows) {
-                server.hub.json(&ServerMessage::Error { request_id: None, session_id: Some(session_id), message: &message }).await;
+                server
+                    .hub
+                    .json(&ServerMessage::Error {
+                        request_id: None,
+                        session_id: Some(session_id),
+                        message: &message,
+                    })
+                    .await;
             }
         }
-        ClientMessage::SetPriority { session_id, focused } => {
+        ClientMessage::SetPriority {
+            session_id,
+            focused,
+        } => {
             let _ = (session_id, focused);
         }
         ClientMessage::Close { session_id } => {
             if let Err(message) = server.close(session_id) {
-                server.hub.json(&ServerMessage::Error { request_id: None, session_id: Some(session_id), message: &message }).await;
+                server
+                    .hub
+                    .json(&ServerMessage::Error {
+                        request_id: None,
+                        session_id: Some(session_id),
+                        message: &message,
+                    })
+                    .await;
             }
         }
     }
 }
 
 async fn handle_binary(server: &Arc<TerminalServer>, bytes: &[u8]) {
-    if bytes.len() < 17 || bytes[0] != 1 { return; }
-    let Ok(session_id) = Uuid::from_slice(&bytes[1..17]) else { return; };
-    if let Err(message) = server.input(session_id, &bytes[17..]) {
-        server.hub.json(&ServerMessage::Error { request_id: None, session_id: Some(session_id), message: &message }).await;
+    if bytes.len() < 17 || bytes[0] != 1 {
+        return;
+    }
+    let Ok(session_id) = Uuid::from_slice(&bytes[1..17]) else {
+        return;
+    };
+    if let Err(message) = server.input(session_id, &bytes[17..]).await {
+        server
+            .hub
+            .json(&ServerMessage::Error {
+                request_id: None,
+                session_id: Some(session_id),
+                message: &message,
+            })
+            .await;
     }
 }
 
@@ -383,12 +565,47 @@ mod tests {
     #[test]
     fn control_messages_are_tagged_and_binary_frames_reserve_session_prefix() {
         let encoded = r#"{"type":"resize","sessionId":"00000000-0000-0000-0000-000000000000","cols":120,"rows":40}"#;
-        assert!(matches!(serde_json::from_str::<ClientMessage>(encoded).unwrap(), ClientMessage::Resize { cols: 120, rows: 40, .. }));
+        assert!(matches!(
+            serde_json::from_str::<ClientMessage>(encoded).unwrap(),
+            ClientMessage::Resize {
+                cols: 120,
+                rows: 40,
+                ..
+            }
+        ));
         let mut frame = vec![2_u8];
         frame.extend_from_slice(Uuid::nil().as_bytes());
         frame.extend_from_slice(b"hello");
         assert_eq!(frame[0], 2);
         assert_eq!(&frame[1..17], &[0_u8; 16]);
         assert_eq!(&frame[17..], b"hello");
+    }
+
+    #[test]
+    fn hub_send_parks_until_client_attaches_and_delivers_in_order() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let hub = Arc::new(Hub::new());
+            let pending = {
+                let hub = hub.clone();
+                tokio::spawn(async move { hub.send(ServerFrame::Text("first".into())).await })
+            };
+            tokio::task::yield_now().await;
+            let (sender, mut receiver) = mpsc::channel::<ServerFrame>(8);
+            hub.attach(sender);
+            pending.await.unwrap();
+            hub.send(ServerFrame::Text("second".into())).await;
+            let order: Vec<String> = [receiver.recv().await, receiver.recv().await]
+                .into_iter()
+                .map(|frame| match frame {
+                    Some(ServerFrame::Text(text)) => text,
+                    _ => panic!("expected text frame"),
+                })
+                .collect();
+            assert_eq!(order, ["first", "second"]);
+        });
     }
 }
