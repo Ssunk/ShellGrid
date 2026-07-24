@@ -383,7 +383,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "climultiple"
+name = "shellgrid"
 version = "0.1.0"
 dependencies = [
  "anyhow",

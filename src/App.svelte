@@ -219,14 +219,14 @@
 </script>
 
 <svelte:head>
-  <title>CliMultiple</title>
+  <title>ShellGrid</title>
 </svelte:head>
 
 <svelte:window on:keydown={handleShortcut} />
 
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><SquareTerminal size={18} /><span>CliMultiple</span><small>工作区</small></div>
+    <div class="brand"><SquareTerminal size={18} /><span>ShellGrid</span><small>工作区</small></div>
     <div class="toolbar-group">
       <button class="toolbar-button" title="左右分割 (Ctrl+Shift+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割</button>
       <button class="toolbar-button" title="上下分割 (Ctrl+Shift+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割</button>

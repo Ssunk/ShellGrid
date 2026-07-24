@@ -1,6 +1,6 @@
 import type { PaneLaunchInfo, SessionState, SplitDirection } from "./types";
 
-export const APP_CONTEXT = Symbol("climultiple-app");
+export const APP_CONTEXT = Symbol("shellgrid-app");
 
 export interface AppController {
   getLaunch(paneId: string): PaneLaunchInfo;

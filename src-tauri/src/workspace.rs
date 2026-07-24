@@ -184,7 +184,7 @@ fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
 pub fn workspace_path() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("CliMultiple")
+        .join("ShellGrid")
         .join("workspace.json")
 }
 

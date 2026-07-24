@@ -379,7 +379,7 @@ fn is_pwsh(shell: &str) -> bool {
 }
 
 fn shell_integration() -> &'static str {
-    "$global:__CliMultipleOriginalPrompt=$function:prompt; function global:prompt { try { [Console]::Write(\"`e]9;9;$((Get-Location).Path)`e\\\") } catch {}; & $global:__CliMultipleOriginalPrompt }"
+    "$global:__ShellGridOriginalPrompt=$function:prompt; function global:prompt { try { [Console]::Write(\"`e]9;9;$((Get-Location).Path)`e\\\") } catch {}; & $global:__ShellGridOriginalPrompt }"
 }
 
 #[derive(Deserialize)]

@@ -59,7 +59,7 @@ fn environment() -> EnvironmentStatus {
     let pwsh_path = find_pwsh();
     let windows_supported = cfg!(windows);
     let message = if !windows_supported {
-        Some("CliMultiple 需要 Windows 10 1903 或更高版本".into())
+        Some("ShellGrid 需要 Windows 10 1903 或更高版本".into())
     } else if pwsh_path.is_none() {
         Some("未找到 PowerShell 7（pwsh.exe），请先安装后重启应用".into())
     } else {
@@ -76,10 +76,38 @@ fn environment() -> EnvironmentStatus {
 }
 
 fn find_pwsh() -> Option<String> {
-    let output = std::process::Command::new("where.exe")
-        .arg("pwsh.exe")
-        .output()
-        .ok()?;
+    find_pwsh_installed().or_else(find_pwsh_on_path)
+}
+
+// 先探测固定安装位置：几次文件元数据查询即可覆盖 MSI/winget 默认目录与商店版，
+// 避免每次启动都付出 where.exe 的进程创建与全 PATH 扫描（PATH 含失效网络目录时可达秒级）。
+fn find_pwsh_installed() -> Option<String> {
+    let candidates = [
+        ("ProgramFiles", r"PowerShell\7\pwsh.exe"),
+        ("ProgramFiles(x86)", r"PowerShell\7\pwsh.exe"),
+        ("ProgramFiles", r"PowerShell\7-preview\pwsh.exe"),
+        ("LOCALAPPDATA", r"Microsoft\WindowsApps\pwsh.exe"),
+    ];
+    candidates.iter().find_map(|(variable, relative)| {
+        let candidate = PathBuf::from(std::env::var_os(variable)?).join(relative);
+        // 商店版 pwsh 是应用执行别名（reparse point），fs::metadata 对其会失败，
+        // 因此用 symlink_metadata 判断存在性。
+        std::fs::symlink_metadata(&candidate)
+            .is_ok_and(|metadata| !metadata.is_dir())
+            .then(|| candidate.to_string_lossy().into_owned())
+    })
+}
+
+fn find_pwsh_on_path() -> Option<String> {
+    let mut command = std::process::Command::new("where.exe");
+    command.arg("pwsh.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // 图形子系统进程派生控制台程序会闪现控制台窗口，需显式抑制。
+        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
+    }
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -123,7 +151,7 @@ pub fn run() {
             open_external
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build CliMultiple");
+        .expect("failed to build ShellGrid");
 
     application.run(|handle, event| {
         if matches!(
