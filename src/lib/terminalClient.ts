@@ -30,6 +30,7 @@ export class TerminalClient {
   private requests = new Map<string, string>();
   private queues = new Map<string, OutputQueue>();
   private pendingOutput = new Map<string, Uint8Array[]>();
+  private pendingResize = new Map<string, { cols: number; rows: number }>();
   private focusedPane?: string;
 
   constructor(
@@ -62,6 +63,7 @@ export class TerminalClient {
     this.panesBySession.clear();
     this.requests.clear();
     this.pendingOutput.clear();
+    this.pendingResize.clear();
     for (const queue of this.queues.values()) {
       if (queue.timer !== undefined) window.clearTimeout(queue.timer);
     }
@@ -90,7 +92,14 @@ export class TerminalClient {
 
   resize(paneId: string, cols: number, rows: number): void {
     const sessionId = this.sessions.get(paneId);
-    if (sessionId) this.sendJson({ type: "resize", sessionId, cols, rows });
+    if (sessionId) {
+      this.sendJson({ type: "resize", sessionId, cols, rows });
+    } else {
+      // 会话尚未创建完成：先记住尺寸，待 created 后补发。否则窗格创建早期 fit 得到的
+      // 真实行列会因 sessionId 缺失被丢弃，PTY 停留在 create 时的默认尺寸，里面的
+      // shell/agent 会按错误行列绘制而错位。
+      this.pendingResize.set(paneId, { cols, rows });
+    }
   }
 
   focus(paneId: string): void {
@@ -113,6 +122,7 @@ export class TerminalClient {
     const queue = this.queues.get(paneId);
     if (queue?.timer !== undefined) window.clearTimeout(queue.timer);
     this.queues.delete(paneId);
+    this.pendingResize.delete(paneId);
   }
 
   isRunning(paneId: string): boolean {
@@ -131,6 +141,12 @@ export class TerminalClient {
         this.sessions.set(message.paneId, message.sessionId);
         this.panesBySession.set(message.sessionId, message.paneId);
         this.callbacks.onCreated(message.paneId, message.sessionId);
+        // 补发创建期间被缓存的尺寸，纠正 PTY 行列，避免新窗格里的 shell/agent 错位。
+        const size = this.pendingResize.get(message.paneId);
+        if (size) {
+          this.pendingResize.delete(message.paneId);
+          this.sendJson({ type: "resize", sessionId: message.sessionId, cols: size.cols, rows: size.rows });
+        }
         const pending = this.pendingOutput.get(message.sessionId);
         if (pending) {
           this.pendingOutput.delete(message.sessionId);
