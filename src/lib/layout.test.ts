@@ -38,4 +38,22 @@ describe("layout tree", () => {
     };
     expect(sanitizeWorkspace({ schemaVersion: 1, layout: { type: "wat" } }, fallback)).toBe(fallback);
   });
+
+  it("keeps a valid proxy and strips a corrupt one without touching layout", () => {
+    const fallback: WorkspaceStateV1 = {
+      schemaVersion: 1,
+      layout: root,
+      panes: { one: { cwd: "C:\\", shell: "pwsh.exe", args: ["-NoLogo"] } },
+    };
+    const withProxy: WorkspaceStateV1 = {
+      ...fallback,
+      proxy: { enabled: true, url: "http://127.0.0.1:7890", noProxy: "localhost" },
+    };
+    expect(sanitizeWorkspace(withProxy, fallback)).toBe(withProxy);
+    const corrupted = { ...fallback, proxy: { enabled: true, url: 42 } };
+    const sanitized = sanitizeWorkspace(corrupted, fallback);
+    expect(sanitized).not.toBe(fallback);
+    expect(sanitized.layout).toEqual(fallback.layout);
+    expect(sanitized.proxy).toBeUndefined();
+  });
 });

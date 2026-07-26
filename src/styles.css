@@ -33,6 +33,17 @@ button { font: inherit; color: inherit; }
 .environment-row b { color: #e07b82; font-size: 11px; font-weight: 500; }
 .environment-row b.ok { color: #8bd5a5; }
 .environment-popover code { display: block; margin-top: 7px; overflow: hidden; color: #7f8a94; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-proxy.proxy-on { color: #8bd5a5; }
+.toolbar-proxy.proxy-on:hover { color: #a9e3bd; }
+.proxy-popover { display: flex; flex-direction: column; gap: 9px; }
+.proxy-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #c3cad0; cursor: pointer; }
+.proxy-toggle input { accent-color: #6ca382; }
+.proxy-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #9aa3aa; }
+.proxy-field input { height: 26px; padding: 0 8px; border: 1px solid #333b42; border-radius: 4px; background: #12161a; color: #d6d9dc; font-size: 12px; }
+.proxy-field input:focus { border-color: #6ca382; outline: none; }
+.proxy-hint, .proxy-error { margin: 0; font-size: 10px; line-height: 1.5; }
+.proxy-hint { color: #75808a; }
+.proxy-error { color: #e07b82; }
 .workspace { min-height: 0; flex: 1; padding: 7px; background: #0c0f11; }
 .startup-state { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; color: #7f8a94; font-size: 12px; }
 .startup-state svg { color: #8bd5a5; }

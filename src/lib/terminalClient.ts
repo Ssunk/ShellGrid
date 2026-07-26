@@ -1,4 +1,5 @@
 import type { PaneLaunchInfo } from "./types";
+import type { SessionProxy } from "./proxy";
 import { writeTerminal } from "./terminalRegistry";
 
 interface ClientCallbacks {
@@ -71,12 +72,19 @@ export class TerminalClient {
     this.callbacks.onDisconnected();
   }
 
-  async create(paneId: string, launch: PaneLaunchInfo, cols: number, rows: number): Promise<void> {
+  async create(
+    paneId: string,
+    launch: PaneLaunchInfo,
+    cols: number,
+    rows: number,
+    proxy?: SessionProxy,
+  ): Promise<void> {
     if (this.sessions.has(paneId) || [...this.requests.values()].includes(paneId)) return;
     await this.connect();
     const requestId = crypto.randomUUID();
     this.requests.set(requestId, paneId);
-    this.sendJson({ type: "create", requestId, paneId, ...launch, cols, rows });
+    // proxy 为 undefined 时 JSON.stringify 会省略该字段，Rust 端反序列化为 None。
+    this.sendJson({ type: "create", requestId, paneId, ...launch, cols, rows, proxy });
   }
 
   input(paneId: string, data: string): void {

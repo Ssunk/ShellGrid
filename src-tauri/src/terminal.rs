@@ -26,6 +26,14 @@ const OUTPUT_CHUNK_SIZE: usize = 16 * 1024;
 const SESSION_QUEUE_DEPTH: usize = 64;
 const INPUT_QUEUE_DEPTH: usize = 128;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxyLaunch {
+    url: String,
+    #[serde(default)]
+    no_proxy: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(
     tag = "type",
@@ -41,6 +49,7 @@ enum ClientMessage {
         args: Vec<String>,
         cols: u16,
         rows: u16,
+        proxy: Option<ProxyLaunch>,
     },
     Resize {
         session_id: Uuid,
@@ -179,6 +188,7 @@ impl TerminalServer {
         args: &[String],
         cols: u16,
         rows: u16,
+        proxy: Option<&ProxyLaunch>,
     ) -> Result<SpawnedSession, String> {
         if !Path::new(cwd).is_dir() {
             return Err(format!("启动目录不存在：{cwd}"));
@@ -193,6 +203,11 @@ impl TerminalServer {
             .map_err(|error| format!("无法创建 ConPTY：{error}"))?;
         let mut command = CommandBuilder::new(shell);
         command.cwd(cwd);
+        if let Some(proxy) = proxy {
+            for (name, value) in proxy_environment(proxy) {
+                command.env(name, value);
+            }
+        }
         for argument in args {
             command.arg(argument);
         }
@@ -378,6 +393,21 @@ fn is_pwsh(shell: &str) -> bool {
         .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("pwsh"))
 }
 
+// 覆盖 curl/git/Node/Rust CLI 等常见工具读取的代理变量；Windows 环境变量不区分大小写，
+// 无需再补小写变体。仅注入新进程环境，不修改系统或已运行会话。
+fn proxy_environment(proxy: &ProxyLaunch) -> Vec<(&'static str, String)> {
+    let url = proxy.url.trim();
+    let mut variables: Vec<(&'static str, String)> = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]
+        .into_iter()
+        .map(|name| (name, url.to_string()))
+        .collect();
+    let no_proxy = proxy.no_proxy.as_deref().map_or("", str::trim);
+    if !no_proxy.is_empty() {
+        variables.push(("NO_PROXY", no_proxy.to_string()));
+    }
+    variables
+}
+
 fn shell_integration() -> &'static str {
     "$global:__ShellGridOriginalPrompt=$function:prompt; function global:prompt { try { [Console]::Write(\"`e]9;9;$((Get-Location).Path)`e\\\") } catch {}; & $global:__ShellGridOriginalPrompt }"
 }
@@ -451,10 +481,11 @@ async fn handle_control(server: &Arc<TerminalServer>, text: &str) {
             args,
             cols,
             rows,
+            proxy,
         } => {
             let spawner = server.clone();
             let result = tauri::async_runtime::spawn_blocking(move || {
-                spawner.create(&cwd, &shell, &args, cols, rows)
+                spawner.create(&cwd, &shell, &args, cols, rows, proxy.as_ref())
             })
             .await
             .map_err(|error| error.to_string())
@@ -579,6 +610,52 @@ mod tests {
         assert_eq!(frame[0], 2);
         assert_eq!(&frame[1..17], &[0_u8; 16]);
         assert_eq!(&frame[17..], b"hello");
+    }
+
+    #[test]
+    fn create_message_accepts_optional_proxy() {
+        let base = r#"{"type":"create","requestId":"r","paneId":"p","cwd":"C:\\","shell":"pwsh.exe","args":[],"cols":80,"rows":24"#;
+        let without_proxy = format!("{base}}}");
+        assert!(matches!(
+            serde_json::from_str::<ClientMessage>(&without_proxy).unwrap(),
+            ClientMessage::Create { proxy: None, .. }
+        ));
+        let with_proxy =
+            format!(r#"{base},"proxy":{{"url":"http://127.0.0.1:7890","noProxy":"localhost"}}}}"#);
+        let ClientMessage::Create { proxy, .. } =
+            serde_json::from_str::<ClientMessage>(&with_proxy).unwrap()
+        else {
+            panic!("expected create message");
+        };
+        let proxy = proxy.expect("proxy should deserialize");
+        assert_eq!(proxy.url, "http://127.0.0.1:7890");
+        assert_eq!(proxy.no_proxy.as_deref(), Some("localhost"));
+    }
+
+    #[test]
+    fn proxy_environment_sets_standard_variables() {
+        let proxy = ProxyLaunch {
+            url: " http://127.0.0.1:7890 ".into(),
+            no_proxy: Some("localhost,127.0.0.1".into()),
+        };
+        let variables = proxy_environment(&proxy);
+        let url = "http://127.0.0.1:7890".to_string();
+        assert_eq!(
+            variables,
+            vec![
+                ("HTTP_PROXY", url.clone()),
+                ("HTTPS_PROXY", url.clone()),
+                ("ALL_PROXY", url),
+                ("NO_PROXY", "localhost,127.0.0.1".into()),
+            ]
+        );
+        let minimal = ProxyLaunch {
+            url: "socks5://proxy.local:1080".into(),
+            no_proxy: Some("  ".into()),
+        };
+        assert!(proxy_environment(&minimal)
+            .iter()
+            .all(|(name, _)| *name != "NO_PROXY"));
     }
 
     #[test]

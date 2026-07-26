@@ -42,7 +42,8 @@ ShellGrid 是 Windows x64 专用的多终端桌面应用，技术栈为 Tauri 2�
 - 控制消息使用 JSON；高频输入/输出使用二进制帧。当前帧格式为 1 字节类型、16 字节会话 UUID、其余为载荷。
 - Rust 端会话输出队列必须有界，并通过阻塞读取形成 ConPTY 反压。
 - 关闭单个窗格或整个应用时，必须终止相应 Job Object 中的 PowerShell 及其子进程。窗口关闭确认监听器不能递归阻止最终关闭。
-- 工作区保存到 `%LOCALAPPDATA%\ShellGrid\workspace.json`。只保存布局和启动信息，不保存终端输出、环境变量快照或 Agent 进程状态。
+- 工作区保存到 `%LOCALAPPDATA%\ShellGrid\workspace.json`。只保存布局、启动信息和代理设置，不保存终端输出、环境变量快照或 Agent 进程状态。
+- 工作区级代理设置只允许 `http`、`https`、`socks5`、`socks5h` 地址，仅在创建会话时通过 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` 环境变量注入，已运行会话不受影响。加载时损坏的代理配置只丢弃代理本身，不得让整个工作区回退到默认布局。
 - `open_external` 只允许 `http` 和 `https`。不要放宽协议白名单。
 - 不得把 PTY 输出、Agent 消息、命令内容或潜在密钥写入日志。
 

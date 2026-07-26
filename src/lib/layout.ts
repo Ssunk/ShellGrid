@@ -1,4 +1,5 @@
 import type { LayoutNode, PaneLaunchInfo, SplitDirection, WorkspaceStateV1 } from "./types";
+import { sanitizeProxy } from "./proxy";
 
 export const MAX_PANES = 16;
 export const MIN_RATIO = 0.15;
@@ -74,7 +75,12 @@ export function sanitizeWorkspace(value: unknown, fallback: WorkspaceStateV1): W
       return fallback;
     }
   }
-  return state as WorkspaceStateV1;
+  const workspace = state as WorkspaceStateV1;
+  const proxy = sanitizeProxy(workspace.proxy);
+  // 代理字段损坏时只剥离代理，布局与启动信息保持原样。
+  if (proxy === workspace.proxy) return workspace;
+  const { proxy: _invalid, ...rest } = workspace;
+  return proxy ? { ...rest, proxy } : rest;
 }
 
 function isLayoutNode(value: unknown): value is LayoutNode {

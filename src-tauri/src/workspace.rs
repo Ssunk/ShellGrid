@@ -43,10 +43,39 @@ pub struct PaneLaunchInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProxyConfig {
+    pub enabled: bool,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub no_proxy: String,
+}
+
+impl ProxyConfig {
+    // 仅在启用时校验地址：停用状态允许保留用户未写完的草稿。
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let parsed =
+            url::Url::parse(self.url.trim()).map_err(|_| "代理地址格式无效".to_string())?;
+        if !matches!(parsed.scheme(), "http" | "https" | "socks5" | "socks5h") {
+            return Err("代理协议只支持 http、https、socks5 或 socks5h".into());
+        }
+        if parsed.host_str().map_or(true, str::is_empty) {
+            return Err("代理地址缺少主机".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceStateV1 {
     pub schema_version: u8,
     pub layout: LayoutNode,
     pub panes: HashMap<String, PaneLaunchInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfig>,
 }
 
 impl WorkspaceStateV1 {
@@ -68,6 +97,7 @@ impl WorkspaceStateV1 {
             schema_version: 1,
             layout,
             panes,
+            proxy: None,
         }
     }
 
@@ -92,6 +122,9 @@ impl WorkspaceStateV1 {
             if pane.shell.trim().is_empty() || pane.cwd.trim().is_empty() {
                 return Err(format!("窗格 {id} 的启动信息无效"));
             }
+        }
+        if let Some(proxy) = &self.proxy {
+            proxy.validate()?;
         }
         Ok(())
     }
@@ -120,7 +153,17 @@ pub fn load_or_default(path: &Path, fallback: WorkspaceStateV1) -> WorkspaceStat
     let Ok(contents) = fs::read(path) else {
         return fallback;
     };
-    let parsed = serde_json::from_slice::<WorkspaceStateV1>(&contents);
+    let parsed = serde_json::from_slice::<WorkspaceStateV1>(&contents).map(|mut workspace| {
+        // 代理配置损坏时只丢弃代理本身，不能让整个布局回退为默认单窗格。
+        if workspace
+            .proxy
+            .as_ref()
+            .is_some_and(|proxy| proxy.validate().is_err())
+        {
+            workspace.proxy = None;
+        }
+        workspace
+    });
     match parsed {
         Ok(workspace) if workspace.validate().is_ok() => workspace,
         _ => {
@@ -236,5 +279,61 @@ mod tests {
         }
         // Unreferenced launch records do not alter the live layout.
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn round_trips_proxy_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let mut expected = fallback();
+        expected.proxy = Some(ProxyConfig {
+            enabled: true,
+            url: "http://127.0.0.1:7890".into(),
+            no_proxy: "localhost,127.0.0.1".into(),
+        });
+        save(&path, &expected).unwrap();
+        assert_eq!(load_or_default(&path, fallback()), expected);
+    }
+
+    #[test]
+    fn validates_proxy_only_when_enabled() {
+        let mut state = fallback();
+        state.proxy = Some(ProxyConfig {
+            enabled: false,
+            url: "还没写完".into(),
+            no_proxy: String::new(),
+        });
+        assert!(state.validate().is_ok());
+        for url in ["not a url", "ftp://127.0.0.1:21", "http://"] {
+            state.proxy = Some(ProxyConfig {
+                enabled: true,
+                url: url.into(),
+                no_proxy: String::new(),
+            });
+            assert!(state.validate().is_err(), "应拒绝启用的非法代理：{url}");
+        }
+        for url in ["http://127.0.0.1:7890", "socks5://proxy.local:1080"] {
+            state.proxy = Some(ProxyConfig {
+                enabled: true,
+                url: url.into(),
+                no_proxy: String::new(),
+            });
+            assert!(state.validate().is_ok(), "应接受合法代理：{url}");
+        }
+    }
+
+    #[test]
+    fn drops_invalid_proxy_on_load_but_keeps_layout() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let expected = fallback();
+        let mut json = serde_json::to_value(&expected).unwrap();
+        json["proxy"] = serde_json::json!({ "enabled": true, "url": "not a url" });
+        fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        let loaded = load_or_default(&path, fallback());
+        assert_eq!(loaded, expected);
+        assert!(loaded.proxy.is_none());
+        // 只丢弃代理，不把工作区文件改名为损坏备份。
+        assert!(path.exists());
     }
 }

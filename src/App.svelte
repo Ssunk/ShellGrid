@@ -2,13 +2,14 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
   import { onMount, setContext } from "svelte";
-  import { Columns2, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import { Columns2, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
   import LayoutNode from "./components/LayoutNode.svelte";
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
+  import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
   import { disposeTerminal, fitTerminal, getTerminal, terminalSize } from "./lib/terminalRegistry";
-  import type { Bootstrap, EnvironmentStatus, SessionState, WorkspaceStateV1 } from "./lib/types";
+  import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
   const defaultPaneId = "local-pane";
   const fallbackWorkspace: WorkspaceStateV1 = {
@@ -31,6 +32,8 @@
   let errorMessage = "";
   let saveState: "saved" | "saving" | "dirty" = "saved";
   let showInfo = false;
+  let showProxy = false;
+  let proxyDraft: ProxyConfig = { enabled: false, url: "", noProxy: "" };
   let nextPaneNumber = 2;
   let saveTimer = 0;
   let reconnectTimer = 0;
@@ -68,7 +71,7 @@
         onResize: (id, cols, rows) => terminalClient?.resize(id, cols, rows),
       });
       entry.attach(host);
-      void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows);
+      void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows, sessionProxy(workspace.proxy));
     },
     resizeTerminal: (paneId) => {
       fitTerminal(paneId);
@@ -145,7 +148,7 @@
     errorMessage = "";
     for (const paneId of paneIds(workspace.layout)) {
       const size = terminalSize(paneId);
-      void terminalClient.create(paneId, controller.getLaunch(paneId), size?.cols ?? 80, size?.rows ?? 24);
+      void terminalClient.create(paneId, controller.getLaunch(paneId), size?.cols ?? 80, size?.rows ?? 24, sessionProxy(workspace.proxy));
     }
   }
 
@@ -205,6 +208,29 @@
     split(activePaneId, direction);
   }
 
+  function toggleInfo(): void {
+    showInfo = !showInfo;
+    if (showInfo) showProxy = false;
+  }
+
+  function toggleProxy(): void {
+    showProxy = !showProxy;
+    if (showProxy) {
+      showInfo = false;
+      proxyDraft = { enabled: false, url: "", noProxy: "", ...workspace.proxy };
+    }
+  }
+
+  // 只把合法（或已停用）的草稿写入工作区：启用状态下的非法地址若被持久化，
+  // Rust 端 validate 会拒绝保存，连布局改动也会一起写不进磁盘。
+  function applyProxyDraft(): void {
+    proxyDraft = { ...proxyDraft, url: normalizeProxyUrl(proxyDraft.url) };
+    if (proxyDraft.enabled && !isValidProxyUrl(proxyDraft.url)) return;
+    const blank = !proxyDraft.enabled && proxyDraft.url === "" && !(proxyDraft.noProxy ?? "").trim();
+    workspace = { ...workspace, proxy: blank ? undefined : { ...proxyDraft } };
+    markDirty();
+  }
+
   function handleShortcut(event: KeyboardEvent): void {
     // 使用 Ctrl+Shift 组合；Ctrl+Alt 在部分键盘布局上等价于 AltGr，会拦截正常字符输入。
     if (!event.ctrlKey || !event.shiftKey || event.altKey) return;
@@ -235,7 +261,8 @@
     <div class="toolbar-spacer"></div>
     <span class="pane-count">{paneIds(workspace.layout).length} / {MAX_PANES} 窗格</span>
     <span class:dirty={saveState !== "saved"} class="save-indicator">{saveState === "saved" ? "已保存" : saveState === "saving" ? "保存中" : "待保存"}</span>
-    <button class="icon-button toolbar-info" title="运行环境" on:click={() => (showInfo = !showInfo)}><Info size={17} /></button>
+    <button class="icon-button toolbar-proxy" class:proxy-on={Boolean(workspace.proxy?.enabled)} title={workspace.proxy?.enabled ? "网络代理（已启用）" : "网络代理"} on:click={toggleProxy}><Globe size={17} /></button>
+    <button class="icon-button toolbar-info" title="运行环境" on:click={toggleInfo}><Info size={17} /></button>
   </header>
 
   {#if environment.message || errorMessage}
@@ -253,6 +280,29 @@
       <div class="environment-row"><span>WebView2</span><b class:ok={environment.webview2Available}>{environment.webview2Available ? "可用" : "缺失"}</b></div>
       <div class="environment-row"><span>PowerShell 7</span><b class:ok={environment.pwshAvailable}>{environment.pwshAvailable ? "可用" : "缺失"}</b></div>
       {#if environment.pwshPath}<code>{environment.pwshPath}</code>{/if}
+    </aside>
+  {/if}
+
+  {#if showProxy}
+    <aside class="environment-popover proxy-popover">
+      <div class="popover-title">网络代理</div>
+      <label class="proxy-toggle">
+        <input type="checkbox" bind:checked={proxyDraft.enabled} on:change={applyProxyDraft} />
+        <span>为新建终端启用代理</span>
+      </label>
+      <label class="proxy-field">
+        <span>代理地址</span>
+        <input type="text" placeholder="http://127.0.0.1:7890" spellcheck="false" bind:value={proxyDraft.url} on:change={applyProxyDraft} />
+      </label>
+      <label class="proxy-field">
+        <span>例外列表（NO_PROXY，可选）</span>
+        <input type="text" placeholder="localhost,127.0.0.1" spellcheck="false" bind:value={proxyDraft.noProxy} on:change={applyProxyDraft} />
+      </label>
+      {#if proxyDraft.enabled && !isValidProxyUrl(normalizeProxyUrl(proxyDraft.url))}
+        <p class="proxy-error">代理地址无效：需要 http、https 或 socks5 地址，例如 http://127.0.0.1:7890</p>
+      {:else}
+        <p class="proxy-hint">通过 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 环境变量注入，仅对之后新建的终端会话生效。</p>
+      {/if}
     </aside>
   {/if}
 

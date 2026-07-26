@@ -22,10 +22,17 @@ export interface PaneLaunchInfo {
   args: string[];
 }
 
+export interface ProxyConfig {
+  enabled: boolean;
+  url: string;
+  noProxy?: string;
+}
+
 export interface WorkspaceStateV1 {
   schemaVersion: 1;
   layout: LayoutNode;
   panes: Record<string, PaneLaunchInfo>;
+  proxy?: ProxyConfig;
 }
 
 export interface EnvironmentStatus {
