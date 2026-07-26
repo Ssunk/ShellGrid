@@ -1,14 +1,16 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { onMount, setContext } from "svelte";
-  import { Columns2, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import { Columns2, Download, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
   import LayoutNode from "./components/LayoutNode.svelte";
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
   import { disposeTerminal, fitTerminal, getTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
   const defaultPaneId = "local-pane";
@@ -34,6 +36,11 @@
   let showInfo = false;
   let showProxy = false;
   let proxyDraft: ProxyConfig = { enabled: false, url: "", noProxy: "" };
+  let appVersion = "";
+  let updateInfo: UpdateInfo | null = null;
+  let updateStatus: "idle" | "checking" | "latest" | "found" | "error" = "idle";
+  let showUpdateNotice = false;
+  const DISMISSED_UPDATE_KEY = "shellgrid-dismissed-update";
   let nextPaneNumber = 2;
   let saveTimer = 0;
   let reconnectTimer = 0;
@@ -130,6 +137,8 @@
       stopListening?.();
       await appWindow.close();
     });
+    appVersion = await getVersion().catch(() => "");
+    void runUpdateCheck(true);
   }
 
   function scheduleReconnect(): void {
@@ -231,6 +240,30 @@
     markDirty();
   }
 
+  // startup 为 true 时静默检查：失败不打扰，被用户忽略过的版本不再弹出提示条。
+  async function runUpdateCheck(startup = false): Promise<void> {
+    if (!appVersion || updateStatus === "checking") return;
+    updateStatus = "checking";
+    try {
+      updateInfo = await checkForUpdate(appVersion);
+      updateStatus = updateInfo ? "found" : "latest";
+      if (updateInfo) {
+        showUpdateNotice = !startup || localStorage.getItem(DISMISSED_UPDATE_KEY) !== updateInfo.version;
+      }
+    } catch {
+      updateStatus = "error";
+    }
+  }
+
+  function dismissUpdate(): void {
+    if (updateInfo) localStorage.setItem(DISMISSED_UPDATE_KEY, updateInfo.version);
+    showUpdateNotice = false;
+  }
+
+  function openReleasePage(): void {
+    if (updateInfo) void invoke("open_external", { url: updateInfo.url });
+  }
+
   function handleShortcut(event: KeyboardEvent): void {
     // 使用 Ctrl+Shift 组合；Ctrl+Alt 在部分键盘布局上等价于 AltGr，会拦截正常字符输入。
     if (!event.ctrlKey || !event.shiftKey || event.altKey) return;
@@ -273,6 +306,15 @@
     </div>
   {/if}
 
+  {#if showUpdateNotice && updateInfo}
+    <div class="notice update-notice">
+      <Download size={16} />
+      <span>发现新版本 {updateInfo.version}（当前 v{appVersion}），请从发布页下载安装包更新。</span>
+      <button class="notice-action" on:click={openReleasePage}>查看发布页</button>
+      <button class="icon-button" title="忽略此版本" on:click={dismissUpdate}><X size={15} /></button>
+    </div>
+  {/if}
+
   {#if showInfo}
     <aside class="environment-popover">
       <div class="popover-title">运行环境</div>
@@ -280,6 +322,18 @@
       <div class="environment-row"><span>WebView2</span><b class:ok={environment.webview2Available}>{environment.webview2Available ? "可用" : "缺失"}</b></div>
       <div class="environment-row"><span>PowerShell 7</span><b class:ok={environment.pwshAvailable}>{environment.pwshAvailable ? "可用" : "缺失"}</b></div>
       {#if environment.pwshPath}<code>{environment.pwshPath}</code>{/if}
+      <div class="environment-row"><span>当前版本</span><b class="muted">{appVersion ? `v${appVersion}` : "未知"}</b></div>
+      <div class="environment-row">
+        <span>更新</span>
+        <b class:ok={updateStatus === "latest" || updateStatus === "found"} class:muted={updateStatus === "idle" || updateStatus === "checking"}>
+          {updateStatus === "found" ? `可更新到 ${updateInfo?.version}` : updateStatus === "latest" ? "已是最新" : updateStatus === "checking" ? "检查中..." : updateStatus === "error" ? "检查失败" : "未检查"}
+        </b>
+      </div>
+      {#if updateStatus === "found"}
+        <button class="toolbar-button popover-action" on:click={openReleasePage}><Download size={14} />查看发布页</button>
+      {:else}
+        <button class="toolbar-button popover-action" disabled={updateStatus === "checking" || !appVersion} on:click={() => void runUpdateCheck()}>检查更新</button>
+      {/if}
     </aside>
   {/if}
 

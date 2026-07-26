@@ -26,12 +26,20 @@ button { font: inherit; color: inherit; }
 .toolbar-info { margin-left: 2px; }
 .notice { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid #554622; color: #e5c07b; background: #211d13; font-size: 12px; }
 .notice.error-notice { color: #f08a91; border-color: #5a2f34; background: #241518; }
+.notice.update-notice { color: #8bd5a5; border-color: #2f5540; background: #13211a; }
 .notice .icon-button { margin-left: auto; width: 22px; height: 22px; }
+.update-notice .notice-action { margin-left: auto; height: 22px; padding: 0 9px; border: 1px solid #2f5540; border-radius: 4px; background: transparent; color: #8bd5a5; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.update-notice .notice-action:hover { background: #1a2e23; border-color: #6ca382; color: #a9e3bd; }
+.update-notice .icon-button { margin-left: 0; }
 .environment-popover { position: absolute; z-index: 20; top: 42px; right: 9px; width: 260px; padding: 12px; border: 1px solid #394249; border-radius: 5px; background: #1b2024; box-shadow: 0 10px 26px #0008; }
 .popover-title { margin-bottom: 9px; color: #eef1f3; font-size: 12px; font-weight: 650; }
 .environment-row { display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #2c3339; font-size: 12px; color: #9aa3aa; }
 .environment-row b { color: #e07b82; font-size: 11px; font-weight: 500; }
 .environment-row b.ok { color: #8bd5a5; }
+.environment-row b.muted { color: #9aa3aa; }
+.popover-action { width: 100%; height: 27px; margin-top: 8px; justify-content: center; border-color: #333b42; }
+.popover-action:disabled { opacity: 0.55; cursor: default; }
+.popover-action:disabled:hover { background: transparent; border-color: #333b42; color: #b5bdc4; }
 .environment-popover code { display: block; margin-top: 7px; overflow: hidden; color: #7f8a94; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-proxy.proxy-on { color: #8bd5a5; }
 .toolbar-proxy.proxy-on:hover { color: #a9e3bd; }

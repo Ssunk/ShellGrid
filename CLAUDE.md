@@ -45,6 +45,7 @@ ShellGrid 是 Windows x64 专用的多终端桌面应用，技术栈为 Tauri 2�
 - 工作区保存到 `%LOCALAPPDATA%\ShellGrid\workspace.json`。只保存布局、启动信息和代理设置，不保存终端输出、环境变量快照或 Agent 进程状态。
 - 工作区级代理设置只允许 `http`、`https`、`socks5`、`socks5h` 地址，仅在创建会话时通过 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` 环境变量注入，已运行会话不受影响。加载时损坏的代理配置只丢弃代理本身，不得让整个工作区回退到默认布局。
 - `open_external` 只允许 `http` 和 `https`。不要放宽协议白名单。
+- 更新检查只向 `https://api.github.com` 请求本仓库最新 Release 的公开元数据（CSP 中显式放行该域名），发现新版本仅提示并经 `open_external` 打开发布页，不得自动下载或执行安装包。
 - 不得把 PTY 输出、Agent 消息、命令内容或潜在密钥写入日志。
 
 ## 前端约定
