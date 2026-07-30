@@ -29,6 +29,8 @@
   let error = "";
   let notice = "";
   let commitMessage = "";
+  let amend = false;
+  let signoff = false;
   let newBranch = "";
   let showNewBranch = false;
   let showRemotePicker = false;
@@ -45,6 +47,7 @@
     status = null;
     selectedFile = null;
     diff = null;
+    amend = false;
     void refresh();
   }
 
@@ -113,7 +116,23 @@
   }
 
   async function commit(): Promise<void> {
-    if (await mutate("git_commit", { message: commitMessage }, "正在提交...")) commitMessage = "";
+    if (await mutate("git_commit", { message: commitMessage, amend, signoff }, amend ? "正在修补上次提交..." : "正在提交...")) {
+      commitMessage = "";
+      amend = false;
+    }
+  }
+
+  async function toggleAmend(): Promise<void> {
+    if (!amend) {
+      commitMessage = "";
+      return;
+    }
+    if (commitMessage.trim()) return;
+    try {
+      commitMessage = (await invoke<string | null>("git_head_message", { path })) ?? "";
+    } catch {
+      // 读取不到上次提交信息时保持输入框为空，仍可手动填写
+    }
   }
 
   async function switchBranch(event: Event): Promise<void> {
@@ -261,8 +280,12 @@
     </div>
 
     <form class="git-commit" on:submit|preventDefault={() => void commit()}>
-      <textarea aria-label="提交信息" placeholder="提交信息（Ctrl+Enter 提交）" rows="3" bind:value={commitMessage} on:keydown={handleCommitKey}></textarea>
-      <button class="git-command-button" disabled={!commitMessage.trim() || staged.length === 0 || Boolean(operation)}><GitCommitHorizontal size={15} />提交</button>
+      <textarea aria-label="提交信息" placeholder="提交信息（Ctrl+Enter 提交）" rows="6" bind:value={commitMessage} on:keydown={handleCommitKey}></textarea>
+      <div class="git-commit-options">
+        <label title="修补上次提交（git commit --amend）"><input type="checkbox" bind:checked={amend} disabled={Boolean(operation)} on:change={() => void toggleAmend()} />修补提交</label>
+        <label title="在提交信息末尾追加 Signed-off-by（git commit --signoff）"><input type="checkbox" bind:checked={signoff} disabled={Boolean(operation)} />Signed-off</label>
+      </div>
+      <button class="git-command-button" disabled={!commitMessage.trim() || (staged.length === 0 && !amend) || Boolean(operation)}><GitCommitHorizontal size={15} />{amend ? "修补提交" : "提交"}</button>
     </form>
   {/if}
 </aside>

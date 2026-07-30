@@ -241,10 +241,7 @@ impl GitService {
             return Err("没有可取消暂存的文件".into());
         }
         let root = self.required_root(path)?;
-        let has_head = self
-            .output(&root, ["rev-parse", "--verify", "HEAD"])?
-            .status
-            .success();
+        let has_head = self.head_exists(&root)?;
         let mut command = self.command(&root)?;
         if has_head {
             command.args(["restore", "--staged", "--"]);
@@ -258,16 +255,57 @@ impl GitService {
         operation_result(output, "已取消暂存所选文件")
     }
 
-    fn commit(&self, path: &str, message: &str) -> Result<GitOperationResult, String> {
+    fn commit(
+        &self,
+        path: &str,
+        message: &str,
+        amend: bool,
+        signoff: bool,
+    ) -> Result<GitOperationResult, String> {
         let message = message.trim();
         if message.is_empty() {
             return Err("请输入提交信息".into());
         }
         let root = self.required_root(path)?;
-        let output = self.checked_output(&root, ["commit", "-m", message])?;
+        if amend && !self.head_exists(&root)? {
+            return Err("仓库还没有提交，无法修补上次提交".into());
+        }
+        let mut args = vec!["commit", "-m", message];
+        if amend {
+            args.push("--amend");
+        }
+        if signoff {
+            args.push("--signoff");
+        }
+        let output = self.checked_output(&root, args)?;
+        let fallback = if amend {
+            "提交已修补"
+        } else {
+            "提交已创建"
+        };
         Ok(GitOperationResult {
-            message: success_message(&output, "提交已创建"),
+            message: success_message(&output, fallback),
         })
+    }
+
+    fn head_exists(&self, root: &Path) -> Result<bool, String> {
+        Ok(self
+            .output(root, ["rev-parse", "--verify", "HEAD"])?
+            .status
+            .success())
+    }
+
+    fn head_message(&self, path: &str) -> Result<Option<String>, String> {
+        let root = self.required_root(path)?;
+        if !self.head_exists(&root)? {
+            return Ok(None);
+        }
+        let output = self.checked_output(&root, ["log", "-1", "--pretty=%B"])?;
+        Ok(Some(
+            bounded_text(&output.stdout, MAX_MESSAGE_BYTES)
+                .trim_end()
+                .to_string(),
+        ))
     }
 
     fn switch_branch(
@@ -540,9 +578,20 @@ pub async fn git_commit(
     service: State<'_, GitService>,
     path: String,
     message: String,
+    amend: bool,
+    signoff: bool,
 ) -> Result<GitOperationResult, String> {
     let service = service.inner().clone();
-    run_blocking(move || service.commit(&path, &message)).await
+    run_blocking(move || service.commit(&path, &message, amend, signoff)).await
+}
+
+#[tauri::command]
+pub async fn git_head_message(
+    service: State<'_, GitService>,
+    path: String,
+) -> Result<Option<String>, String> {
+    let service = service.inner().clone();
+    run_blocking(move || service.head_message(&path)).await
 }
 
 #[tauri::command]
@@ -640,11 +689,34 @@ mod tests {
             .diff(path.to_str().unwrap(), "hello world.txt", true)
             .unwrap();
         assert!(diff.content.contains("ShellGrid"));
+        assert!(service
+            .commit(path.to_str().unwrap(), "no head yet", true, false)
+            .is_err());
         service
-            .commit(path.to_str().unwrap(), "initial commit")
+            .commit(path.to_str().unwrap(), "initial commit", false, false)
             .unwrap();
         let clean_status = service.status(path.to_str().unwrap()).unwrap();
         assert!(clean_status.files.is_empty());
+        assert_eq!(
+            service.head_message(path.to_str().unwrap()).unwrap(),
+            Some("initial commit".to_string())
+        );
+        service
+            .commit(path.to_str().unwrap(), "amended commit", true, true)
+            .unwrap();
+        let amended = service
+            .head_message(path.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(amended.starts_with("amended commit"));
+        assert!(amended.contains("Signed-off-by: ShellGrid Test <shellgrid@example.invalid>"));
+        assert_eq!(
+            service
+                .checked_output(path, ["rev-list", "--count", "HEAD"])
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                .unwrap(),
+            "1"
+        );
         let initial_branch = clean_status.branch.unwrap();
         service
             .switch_branch(path.to_str().unwrap(), "feature/git-panel", true)
