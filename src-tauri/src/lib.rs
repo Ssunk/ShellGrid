@@ -1,7 +1,9 @@
+mod git;
 mod job;
 mod terminal;
 mod workspace;
 
+use git::GitService;
 use serde::Serialize;
 use std::{path::PathBuf, sync::Arc};
 use tauri::Manager;
@@ -15,6 +17,8 @@ struct EnvironmentStatus {
     webview2_available: bool,
     pwsh_available: bool,
     pwsh_path: Option<String>,
+    git_available: bool,
+    git_path: Option<String>,
     message: Option<String>,
 }
 
@@ -57,6 +61,7 @@ fn open_external(url: String) -> Result<(), String> {
 
 fn environment() -> EnvironmentStatus {
     let pwsh_path = find_pwsh();
+    let git_path = find_git();
     let windows_supported = cfg!(windows);
     let message = if !windows_supported {
         Some("ShellGrid 需要 Windows 10 1903 或更高版本".into())
@@ -71,8 +76,46 @@ fn environment() -> EnvironmentStatus {
         webview2_available: true,
         pwsh_available: pwsh_path.is_some(),
         pwsh_path,
+        git_available: git_path.is_some(),
+        git_path,
         message,
     }
+}
+
+fn find_git() -> Option<String> {
+    let candidates = [
+        ("ProgramFiles", r"Git\cmd\git.exe"),
+        ("ProgramFiles(x86)", r"Git\cmd\git.exe"),
+        ("LOCALAPPDATA", r"Programs\Git\cmd\git.exe"),
+    ];
+    candidates
+        .iter()
+        .find_map(|(variable, relative)| {
+            let candidate = PathBuf::from(std::env::var_os(variable)?).join(relative);
+            candidate
+                .is_file()
+                .then(|| candidate.to_string_lossy().into_owned())
+        })
+        .or_else(|| find_executable_on_path("git.exe"))
+}
+
+fn find_executable_on_path(name: &str) -> Option<String> {
+    let mut command = std::process::Command::new("where.exe");
+    command.arg(name);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn find_pwsh() -> Option<String> {
@@ -99,29 +142,15 @@ fn find_pwsh_installed() -> Option<String> {
 }
 
 fn find_pwsh_on_path() -> Option<String> {
-    let mut command = std::process::Command::new("where.exe");
-    command.arg("pwsh.exe");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // 图形子系统进程派生控制台程序会闪现控制台窗口，需显式抑制。
-        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
-    }
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
+    find_executable_on_path("pwsh.exe")
 }
 
 pub fn run() {
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let environment = environment();
+            let git = GitService::new(environment.git_path.clone());
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("C:\\"));
             let shell = environment
                 .pwsh_path
@@ -143,12 +172,21 @@ pub fn run() {
                 workspace_path,
                 terminal,
             });
+            app.manage(git);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_bootstrap,
             save_workspace,
-            open_external
+            open_external,
+            git::git_status,
+            git::git_diff,
+            git::git_stage,
+            git::git_unstage,
+            git::git_commit,
+            git::git_switch_branch,
+            git::git_pull,
+            git::git_push
         ])
         .build(tauri::generate_context!())
         .expect("failed to build ShellGrid");

@@ -1,6 +1,6 @@
 [package]
 name = "shellgrid"
-version = "0.1.1"
+version = "0.2.0"
 description = "A compact multi-terminal workspace for Windows"
 authors = ["ShellGrid contributors"]
 edition = "2021"
@@ -24,6 +24,7 @@ rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.11.5", features = [] }
+tauri-plugin-dialog = "2"
 thiserror = "2.0"
 tokio = { version = "1.49", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 url = "2.5"

@@ -2,8 +2,10 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { onMount, setContext } from "svelte";
-  import { Columns2, Download, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import { Columns2, Download, FolderOpen, GitBranch, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import GitPanel from "./components/GitPanel.svelte";
   import LayoutNode from "./components/LayoutNode.svelte";
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
@@ -16,6 +18,7 @@
   const defaultPaneId = "local-pane";
   const fallbackWorkspace: WorkspaceStateV1 = {
     schemaVersion: 1,
+    rootPath: "C:\\",
     layout: { type: "pane", paneId: defaultPaneId },
     panes: { [defaultPaneId]: makePaneLaunch("C:\\") },
   };
@@ -25,6 +28,8 @@
     webview2Available: true,
     pwshAvailable: true,
     pwshPath: "pwsh.exe",
+    gitAvailable: true,
+    gitPath: "git.exe",
     message: null,
   };
   let terminalClient: TerminalClient | undefined;
@@ -35,6 +40,7 @@
   let saveState: "saved" | "saving" | "dirty" = "saved";
   let showInfo = false;
   let showProxy = false;
+  let showGit = false;
   let proxyDraft: ProxyConfig = { enabled: false, url: "", noProxy: "" };
   let appVersion = "";
   let updateInfo: UpdateInfo | null = null;
@@ -45,6 +51,10 @@
   let saveTimer = 0;
   let reconnectTimer = 0;
   let unlistenClose: (() => void) | undefined;
+  let currentRoot = "C:\\";
+  let workspaceEpoch = 0;
+
+  $: currentRoot = workspaceRoot(workspace);
 
   const controller: AppController = {
     getLaunch: (paneId) => workspace.panes[paneId] ?? makePaneLaunch("C:\\"),
@@ -97,7 +107,7 @@
   async function initialize(): Promise<void> {
     try {
       const boot = await invoke<Bootstrap>("get_bootstrap");
-      workspace = boot.workspace;
+      workspace = { ...boot.workspace, rootPath: workspaceRoot(boot.workspace) };
       environment = boot.environment;
       activePaneId = paneIds(workspace.layout)[0];
       terminalClient = new TerminalClient(boot.wsUrl, boot.token, {
@@ -217,6 +227,53 @@
     split(activePaneId, direction);
   }
 
+  function workspaceRoot(state: WorkspaceStateV1): string {
+    const first = paneIds(state.layout)[0];
+    return state.rootPath || state.panes[first]?.cwd || "C:\\";
+  }
+
+  function workspaceName(path: string): string {
+    const trimmed = path.replace(/[\\/]+$/, "");
+    return trimmed.split(/[\\/]/).pop() || path;
+  }
+
+  async function chooseWorkspaceFolder(): Promise<void> {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: currentRoot,
+        title: "打开工作区文件夹",
+      });
+      if (typeof selected !== "string" || selected === currentRoot) return;
+      if (
+        Object.values(sessions).some((session) => session.running) &&
+        !window.confirm("打开新文件夹会终止当前所有终端并重置为单窗格，确定继续吗？")
+      ) return;
+
+      for (const paneId of paneIds(workspace.layout)) {
+        terminalClient?.closePane(paneId);
+        disposeTerminal(paneId);
+      }
+      const paneId = `pane-${crypto.randomUUID()}`;
+      workspace = {
+        schemaVersion: 1,
+        rootPath: selected,
+        layout: { type: "pane", paneId },
+        panes: { [paneId]: makePaneLaunch(selected, environment.pwshPath || "pwsh.exe") },
+        proxy: workspace.proxy,
+      };
+      sessions = {};
+      activePaneId = paneId;
+      workspaceEpoch += 1;
+      errorMessage = "";
+      showGit = true;
+      await persist();
+    } catch (reason) {
+      errorMessage = typeof reason === "string" ? reason : "无法打开工作区文件夹";
+    }
+  }
+
   function toggleInfo(): void {
     showInfo = !showInfo;
     if (showInfo) showProxy = false;
@@ -285,8 +342,10 @@
 
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><SquareTerminal size={18} /><span>ShellGrid</span><small>工作区</small></div>
+    <div class="brand"><SquareTerminal size={18} /><span>ShellGrid</span><small title={currentRoot}>{workspaceName(currentRoot)}</small></div>
     <div class="toolbar-group">
+      <button class="toolbar-button" title="打开文件夹作为工作区" on:click={() => void chooseWorkspaceFolder()}><FolderOpen size={16} />打开文件夹</button>
+      <button class:active={showGit} class="toolbar-button" title="切换 Git 源码管理" on:click={() => (showGit = !showGit)}><GitBranch size={16} />源码管理</button>
       <button class="toolbar-button" title="左右分割 (Ctrl+Shift+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割</button>
       <button class="toolbar-button" title="上下分割 (Ctrl+Shift+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割</button>
       <button class="toolbar-button" title="保存工作区" on:click={() => void persist()}><Save size={16} />保存</button>
@@ -322,6 +381,8 @@
       <div class="environment-row"><span>WebView2</span><b class:ok={environment.webview2Available}>{environment.webview2Available ? "可用" : "缺失"}</b></div>
       <div class="environment-row"><span>PowerShell 7</span><b class:ok={environment.pwshAvailable}>{environment.pwshAvailable ? "可用" : "缺失"}</b></div>
       {#if environment.pwshPath}<code>{environment.pwshPath}</code>{/if}
+      <div class="environment-row"><span>Git</span><b class:ok={environment.gitAvailable}>{environment.gitAvailable ? "可用" : "缺失"}</b></div>
+      {#if environment.gitPath}<code>{environment.gitPath}</code>{/if}
       <div class="environment-row"><span>当前版本</span><b class="muted">{appVersion ? `v${appVersion}` : "未知"}</b></div>
       <div class="environment-row">
         <span>更新</span>
@@ -360,14 +421,19 @@
     </aside>
   {/if}
 
-  <main class="workspace" aria-label="终端工作区">
-    {#if ready}
-      <LayoutNode node={workspace.layout} {activePaneId} panes={workspace.panes} {sessions} />
-    {:else}
-      <div class="startup-state">
-        <SquareTerminal size={22} />
-        <span>正在启动终端...</span>
-      </div>
-    {/if}
-  </main>
+  <div class="workbench">
+    {#if showGit}<GitPanel path={currentRoot} gitAvailable={environment.gitAvailable} onClose={() => (showGit = false)} />{/if}
+    <main class="workspace" aria-label="终端工作区">
+      {#if ready}
+        {#key workspaceEpoch}
+          <LayoutNode node={workspace.layout} {activePaneId} panes={workspace.panes} {sessions} />
+        {/key}
+      {:else}
+        <div class="startup-state">
+          <SquareTerminal size={22} />
+          <span>正在启动终端...</span>
+        </div>
+      {/if}
+    </main>
+  </div>
 </div>

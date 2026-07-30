@@ -30,6 +30,7 @@ export interface ProxyConfig {
 
 export interface WorkspaceStateV1 {
   schemaVersion: 1;
+  rootPath?: string;
   layout: LayoutNode;
   panes: Record<string, PaneLaunchInfo>;
   proxy?: ProxyConfig;
@@ -40,7 +41,45 @@ export interface EnvironmentStatus {
   webview2Available: boolean;
   pwshAvailable: boolean;
   pwshPath: string | null;
+  gitAvailable: boolean;
+  gitPath: string | null;
   message: string | null;
+}
+
+export interface GitFileStatus {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  worktreeStatus: string;
+}
+
+export interface GitBranch {
+  name: string;
+  upstream?: string;
+  current: boolean;
+}
+
+export interface GitStatus {
+  isRepository: boolean;
+  repoRoot?: string;
+  branch?: string;
+  detached: boolean;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  files: GitFileStatus[];
+  branches: GitBranch[];
+  remotes: string[];
+}
+
+export interface GitDiff {
+  content: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+export interface GitOperationResult {
+  message: string;
 }
 
 export interface Bootstrap {

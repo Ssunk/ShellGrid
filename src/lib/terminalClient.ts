@@ -32,6 +32,7 @@ export class TerminalClient {
   private queues = new Map<string, OutputQueue>();
   private pendingOutput = new Map<string, Uint8Array[]>();
   private pendingResize = new Map<string, { cols: number; rows: number }>();
+  private closingPanes = new Set<string>();
   private focusedPane?: string;
 
   constructor(
@@ -65,6 +66,7 @@ export class TerminalClient {
     this.requests.clear();
     this.pendingOutput.clear();
     this.pendingResize.clear();
+    this.closingPanes.clear();
     for (const queue of this.queues.values()) {
       if (queue.timer !== undefined) window.clearTimeout(queue.timer);
     }
@@ -79,6 +81,7 @@ export class TerminalClient {
     rows: number,
     proxy?: SessionProxy,
   ): Promise<void> {
+    this.closingPanes.delete(paneId);
     if (this.sessions.has(paneId) || [...this.requests.values()].includes(paneId)) return;
     await this.connect();
     const requestId = crypto.randomUUID();
@@ -120,6 +123,7 @@ export class TerminalClient {
   }
 
   closePane(paneId: string): void {
+    if ([...this.requests.values()].includes(paneId)) this.closingPanes.add(paneId);
     const sessionId = this.sessions.get(paneId);
     if (sessionId) {
       this.sendJson({ type: "close", sessionId });
@@ -146,6 +150,12 @@ export class TerminalClient {
       const message = JSON.parse(data) as ControlMessage;
       if (message.type === "created" && message.requestId && message.sessionId && message.paneId) {
         this.requests.delete(message.requestId);
+        if (this.closingPanes.delete(message.paneId)) {
+          this.pendingOutput.delete(message.sessionId);
+          this.pendingResize.delete(message.paneId);
+          this.sendJson({ type: "close", sessionId: message.sessionId });
+          return;
+        }
         this.sessions.set(message.paneId, message.sessionId);
         this.panesBySession.set(message.sessionId, message.paneId);
         this.callbacks.onCreated(message.paneId, message.sessionId);
@@ -170,8 +180,13 @@ export class TerminalClient {
         }
       } else if (message.type === "error") {
         if (message.sessionId) this.pendingOutput.delete(message.sessionId);
-        const paneId = message.sessionId ? this.panesBySession.get(message.sessionId) : undefined;
-        if (message.requestId) this.requests.delete(message.requestId);
+        let paneId = message.sessionId ? this.panesBySession.get(message.sessionId) : undefined;
+        if (message.requestId) {
+          const requestedPane = this.requests.get(message.requestId);
+          this.requests.delete(message.requestId);
+          if (requestedPane && this.closingPanes.delete(requestedPane)) return;
+          paneId ??= requestedPane;
+        }
         this.callbacks.onError(paneId, message.message ?? "终端服务发生未知错误");
       }
       return;

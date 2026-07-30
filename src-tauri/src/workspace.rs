@@ -72,6 +72,8 @@ impl ProxyConfig {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceStateV1 {
     pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_path: Option<String>,
     pub layout: LayoutNode,
     pub panes: HashMap<String, PaneLaunchInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,6 +97,7 @@ impl WorkspaceStateV1 {
         )]);
         Self {
             schema_version: 1,
+            root_path: Some(cwd.to_string_lossy().into_owned()),
             layout,
             panes,
             proxy: None,
@@ -104,6 +107,13 @@ impl WorkspaceStateV1 {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != 1 {
             return Err("不支持的工作区版本".into());
+        }
+        if self
+            .root_path
+            .as_ref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err("工作区目录无效".into());
         }
         let mut ids = Vec::new();
         collect_panes(&self.layout, &mut ids)?;
@@ -162,6 +172,11 @@ pub fn load_or_default(path: &Path, fallback: WorkspaceStateV1) -> WorkspaceStat
         {
             workspace.proxy = None;
         }
+        if workspace.root_path.is_none() {
+            workspace.root_path = first_pane_id(&workspace.layout)
+                .and_then(|pane_id| workspace.panes.get(pane_id))
+                .map(|pane| pane.cwd.clone());
+        }
         workspace
     });
     match parsed {
@@ -170,6 +185,13 @@ pub fn load_or_default(path: &Path, fallback: WorkspaceStateV1) -> WorkspaceStat
             preserve_corrupt(path);
             fallback
         }
+    }
+}
+
+fn first_pane_id(node: &LayoutNode) -> Option<&str> {
+    match node {
+        LayoutNode::Pane { pane_id } => Some(pane_id),
+        LayoutNode::Split { first, .. } => first_pane_id(first),
     }
 }
 
@@ -334,6 +356,20 @@ mod tests {
         assert_eq!(loaded, expected);
         assert!(loaded.proxy.is_none());
         // 只丢弃代理，不把工作区文件改名为损坏备份。
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn derives_root_path_when_loading_an_older_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let expected = fallback();
+        let mut json = serde_json::to_value(&expected).unwrap();
+        json.as_object_mut().unwrap().remove("rootPath");
+        fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let loaded = load_or_default(&path, fallback());
+        assert_eq!(loaded.root_path, Some("C:\\".into()));
         assert!(path.exists());
     }
 }
