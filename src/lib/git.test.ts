@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLineKind, fileName, operationPaths, parentPath, stagedFiles, workingFiles } from "./git";
+import { diffLineKind, fileName, operationPaths, parentPath, restorePaths, stagedFiles, workingFiles } from "./git";
 import type { GitFileStatus } from "./types";
 
 const files: GitFileStatus[] = [
@@ -30,5 +30,13 @@ describe("git status presentation", () => {
       { path: "new name.ts", originalPath: "old name.ts", indexStatus: "R", worktreeStatus: "." },
       { path: "new name.ts", indexStatus: "M", worktreeStatus: "M" },
     ])).toEqual(["new name.ts", "old name.ts"]);
+  });
+
+  it("restores only tracked worktree paths", () => {
+    expect(restorePaths([
+      { path: "src/partial.ts", indexStatus: "M", worktreeStatus: "M" },
+      { path: "notes/new file.txt", indexStatus: "?", worktreeStatus: "?" },
+      { path: "src/partial.ts", indexStatus: ".", worktreeStatus: "M" },
+    ])).toEqual(["src/partial.ts"]);
   });
 });

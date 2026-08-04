@@ -183,6 +183,7 @@ pub fn run() {
             git::git_diff,
             git::git_stage,
             git::git_unstage,
+            git::git_restore,
             git::git_commit,
             git::git_head_message,
             git::git_switch_branch,

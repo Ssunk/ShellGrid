@@ -35,6 +35,10 @@ export function operationPaths(files: GitFileStatus[]): string[] {
   return [...new Set(files.flatMap((file) => file.originalPath ? [file.path, file.originalPath] : [file.path]))];
 }
 
+export function restorePaths(files: GitFileStatus[]): string[] {
+  return [...new Set(files.filter((file) => file.indexStatus !== "?").map((file) => file.path))];
+}
+
 export function diffLineKind(line: string): "add" | "delete" | "meta" | "plain" {
   if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@") || line.startsWith("diff ")) return "meta";
   if (line.startsWith("+")) return "add";

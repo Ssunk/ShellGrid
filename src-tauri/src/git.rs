@@ -255,6 +255,20 @@ impl GitService {
         operation_result(output, "已取消暂存所选文件")
     }
 
+    fn restore(&self, path: &str, paths: &[String]) -> Result<GitOperationResult, String> {
+        if paths.is_empty() {
+            return Err("没有可恢复的文件".into());
+        }
+        let root = self.required_root(path)?;
+        let mut command = self.command(&root)?;
+        let output = command
+            .args(["restore", "--worktree", "--"])
+            .args(paths)
+            .output()
+            .map_err(|error| format!("无法恢复工作树文件：{error}"))?;
+        operation_result(output, "已恢复所选文件")
+    }
+
     fn commit(
         &self,
         path: &str,
@@ -574,6 +588,16 @@ pub async fn git_unstage(
 }
 
 #[tauri::command]
+pub async fn git_restore(
+    service: State<'_, GitService>,
+    path: String,
+    paths: Vec<String>,
+) -> Result<GitOperationResult, String> {
+    let service = service.inner().clone();
+    run_blocking(move || service.restore(&path, &paths)).await
+}
+
+#[tauri::command]
 pub async fn git_commit(
     service: State<'_, GitService>,
     path: String,
@@ -678,6 +702,9 @@ mod tests {
         service
             .checked_output(path, ["config", "user.email", "shellgrid@example.invalid"])
             .unwrap();
+        service
+            .checked_output(path, ["config", "core.autocrlf", "false"])
+            .unwrap();
         fs::write(path.join("hello world.txt"), "你好，ShellGrid\n").unwrap();
 
         let status = service.status(path.to_str().unwrap()).unwrap();
@@ -697,6 +724,21 @@ mod tests {
             .unwrap();
         let clean_status = service.status(path.to_str().unwrap()).unwrap();
         assert!(clean_status.files.is_empty());
+        fs::write(path.join("hello world.txt"), "已暂存版本\n").unwrap();
+        service
+            .stage(path.to_str().unwrap(), &["hello world.txt".into()])
+            .unwrap();
+        fs::write(path.join("hello world.txt"), "未暂存版本\n").unwrap();
+        service
+            .restore(path.to_str().unwrap(), &["hello world.txt".into()])
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(path.join("hello world.txt")).unwrap(),
+            "已暂存版本\n"
+        );
+        let restored_status = service.status(path.to_str().unwrap()).unwrap();
+        assert_eq!(restored_status.files[0].index_status, "M");
+        assert_eq!(restored_status.files[0].worktree_status, ".");
         assert_eq!(
             service.head_message(path.to_str().unwrap()).unwrap(),
             Some("initial commit".to_string())

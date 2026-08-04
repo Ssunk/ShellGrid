@@ -12,9 +12,10 @@
     Minus,
     Plus,
     RefreshCw,
+    Undo2,
     X,
   } from "lucide-svelte";
-  import { diffLineKind, fileName, gitStatusLabel, operationPaths, parentPath, stagedFiles, workingFiles } from "../lib/git";
+  import { diffLineKind, fileName, gitStatusLabel, operationPaths, parentPath, restorePaths, stagedFiles, workingFiles } from "../lib/git";
   import type { GitDiff, GitFileStatus, GitOperationResult, GitStatus } from "../lib/types";
 
   export let path: string;
@@ -120,6 +121,14 @@
       commitMessage = "";
       amend = false;
     }
+  }
+
+  async function restore(files: GitFileStatus[]): Promise<void> {
+    const paths = restorePaths(files);
+    if (paths.length === 0) return;
+    const subject = paths.length === 1 ? `“${paths[0]}”的未暂存更改` : `${paths.length} 个文件的未暂存更改`;
+    if (!window.confirm(`确定放弃${subject}吗？此操作无法撤销。`)) return;
+    await mutate("git_restore", { paths }, "正在恢复工作树文件...");
   }
 
   async function toggleAmend(): Promise<void> {
@@ -253,12 +262,13 @@
       </section>
 
       <section class="git-change-group">
-        <header><span>更改</span><b>{working.length}</b>{#if working.length}<button class="icon-button" title="全部暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_stage", { paths: operationPaths(working) }, "正在暂存...")}><Plus size={14} /></button>{/if}</header>
+        <header><span>更改</span><b>{working.length}</b>{#if restorePaths(working).length}<button class="icon-button" title="放弃全部未暂存更改（不含未跟踪文件）" disabled={Boolean(operation)} on:click={() => void restore(working)}><Undo2 size={14} /></button>{/if}{#if working.length}<button class="icon-button" title="全部暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_stage", { paths: operationPaths(working) }, "正在暂存...")}><Plus size={14} /></button>{/if}</header>
         {#each working as file (`working:${file.path}`)}
           <div class:selected={!selectedFile?.staged && selectedFile?.file.path === file.path} class="git-file-row">
             <button class="git-file-main" title={file.path} on:click={() => void openDiff(file, false)}>
               <FileDiff size={14} /><span><strong>{fileName(file.path)}</strong>{#if parentPath(file.path)}<small>{parentPath(file.path)}</small>{/if}</span><em title={gitStatusLabel(file.worktreeStatus)}>{file.worktreeStatus}</em>
             </button>
+            {#if file.indexStatus !== "?"}<button class="icon-button" title="放弃未暂存更改（git restore）" disabled={Boolean(operation)} on:click={() => void restore([file])}><Undo2 size={14} /></button>{/if}
             <button class="icon-button" title="暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_stage", { paths: operationPaths([file]) }, "正在暂存...")}><Plus size={14} /></button>
           </div>
         {:else}<p class="git-group-empty">工作树没有未暂存更改</p>{/each}
