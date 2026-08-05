@@ -1,6 +1,6 @@
 [package]
 name = "shellgrid"
-version = "0.2.1"
+version = "0.2.2"
 description = "A compact multi-terminal workspace for Windows"
 authors = ["ShellGrid contributors"]
 edition = "2021"
