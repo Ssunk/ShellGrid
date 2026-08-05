@@ -1,3 +1,4 @@
+mod clipboard_image;
 mod git;
 mod job;
 mod terminal;
@@ -57,6 +58,22 @@ fn open_external(url: String) -> Result<(), String> {
         return Err("只允许打开 http 或 https 链接".into());
     }
     open::that_detached(parsed.as_str()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_clipboard_image(
+    state: tauri::State<'_, RuntimeState>,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let directory = state
+        .workspace_path
+        .parent()
+        .ok_or("剪贴板图片目录无效")?
+        .join("clipboard-images");
+    tokio::task::spawn_blocking(move || clipboard_image::save(&directory, &bytes))
+        .await
+        .map_err(|_| "保存剪贴板图片任务失败".to_string())?
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn environment() -> EnvironmentStatus {
@@ -178,6 +195,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_bootstrap,
             save_workspace,
+            save_clipboard_image,
             open_external,
             git::git_status,
             git::git_diff,

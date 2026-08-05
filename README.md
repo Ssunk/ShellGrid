@@ -12,6 +12,7 @@ Windows x64 多终端桌面应用，每个窗格对应一个独立 PowerShell 7 
 - 窗口关闭确认与工作区自动保存
 - 前端合并批处理（活动窗格 ~8ms / 后台 ~33ms）
 - WebGL 渲染加速（最多 4 上下文）
+- 可将剪贴板截图保存为本地图片并把路径粘贴给 Codex、Claude Code 或 Gemini CLI
 
 ## 技术栈
 

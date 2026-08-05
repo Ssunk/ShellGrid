@@ -13,6 +13,7 @@ class TerminalMock {
   focus = vi.fn();
   dispose = vi.fn();
   write = vi.fn();
+  paste = vi.fn();
 }
 
 vi.mock("@xterm/xterm", () => ({ Terminal: TerminalMock }));
@@ -25,7 +26,7 @@ describe("terminal registry", () => {
   it("keeps one terminal instance while its host moves", async () => {
     const { getTerminal, terminalCount } = await import("./terminalRegistry");
     const callbacks = {
-      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onFocus: vi.fn(), onResize: vi.fn(),
+      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(), onFocus: vi.fn(), onResize: vi.fn(),
     };
     const first = getTerminal("stable-pane", callbacks);
     const second = getTerminal("stable-pane", callbacks);
@@ -37,5 +38,43 @@ describe("terminal registry", () => {
     expect(secondHost.firstElementChild).toBe(first.container);
     expect(firstHost.childElementCount).toBe(0);
     expect(terminalCount()).toBe(1);
+  });
+
+  it("intercepts clipboard images before xterm handles the paste", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const onPasteImages = vi.fn();
+    const entry = getTerminal("image-pane", {
+      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages, onFocus: vi.fn(), onResize: vi.fn(),
+    });
+    const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "shot.png", { type: "image/png" });
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => image }],
+        files: [],
+      },
+    });
+
+    entry.container.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onPasteImages).toHaveBeenCalledWith("image-pane", [image]);
+  });
+
+  it("leaves text paste events for xterm", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const onPasteImages = vi.fn();
+    const entry = getTerminal("text-pane", {
+      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages, onFocus: vi.fn(), onResize: vi.fn(),
+    });
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }], files: [] },
+    });
+
+    entry.container.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onPasteImages).not.toHaveBeenCalled();
   });
 });

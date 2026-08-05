@@ -51,6 +51,7 @@ ShellGrid 是 Windows x64 专用的多终端桌面应用，技术栈为 Tauri 2�
 - 保持 TypeScript 严格检查通过。
 - 优先复用现有 Svelte 组件、上下文和布局纯函数，不要在组件中复制树操作逻辑。
 - 终端默认保留 10,000 行滚动历史；改变该值时评估多窗格内存影响。
+- 剪贴板图片保存在 `%LOCALAPPDATA%\ShellGrid\clipboard-images`，终端中只粘贴文件路径；不要把图片原始字节写入 ConPTY。
 - WebGL 上下文当前最多 4 个，加载失败后使用 xterm.js 内置渲染器。
 - 活动窗格输出约每 8ms 合并，后台窗格约每 33ms 合并，每次最多 64KiB。改变批处理时同时验证输入延迟、输出顺序和内存增长。
 - 快捷键不得占用终端和 Agent 常用键，例如 `Ctrl+C`、`Ctrl+V`、`Enter`、`Escape` 和 `Shift+Tab`。

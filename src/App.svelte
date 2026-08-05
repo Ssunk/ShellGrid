@@ -11,7 +11,7 @@
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { disposeTerminal, fitTerminal, getTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { disposeTerminal, fitTerminal, getTerminal, pasteTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -47,6 +47,7 @@
   let updateStatus: "idle" | "checking" | "latest" | "found" | "error" = "idle";
   let showUpdateNotice = false;
   const DISMISSED_UPDATE_KEY = "shellgrid-dismissed-update";
+  const MAX_CLIPBOARD_IMAGE_BYTES = 20 * 1024 * 1024;
   let nextPaneNumber = 2;
   let saveTimer = 0;
   let reconnectTimer = 0;
@@ -84,6 +85,7 @@
           if (current && !current.title && title) workspace = { ...workspace, panes: { ...workspace.panes, [id]: { ...current, title } } };
         },
         onInput: (id, data) => terminalClient?.input(id, data),
+        onPasteImages: (id, images) => void pasteImages(id, images),
         onFocus: (id) => controller.setActivePane(id),
         onResize: (id, cols, rows) => terminalClient?.resize(id, cols, rows),
       });
@@ -210,6 +212,24 @@
     saveState = "dirty";
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => void persist(), 700);
+  }
+
+  async function pasteImages(paneId: string, images: File[]): Promise<void> {
+    try {
+      const paths: string[] = [];
+      for (const image of images) {
+        if (image.size > MAX_CLIPBOARD_IMAGE_BYTES) throw new Error("剪贴板图片超过 20 MiB 限制");
+        const bytes = Array.from(new Uint8Array(await image.arrayBuffer()));
+        paths.push(await invoke<string>("save_clipboard_image", { bytes }));
+      }
+      if (paths.length === 0) return;
+      const references = paths.map((path) => `[图片文件: "${path}"]`).join(" ");
+      pasteTerminal(paneId, ` ${references} `);
+    } catch (reason) {
+      errorMessage = typeof reason === "string"
+        ? reason
+        : reason instanceof Error ? reason.message : "无法保存剪贴板图片";
+    }
   }
 
   async function persist(): Promise<void> {
