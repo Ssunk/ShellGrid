@@ -364,7 +364,12 @@ impl GitService {
         })
     }
 
-    fn push(&self, path: &str, remote: Option<&str>) -> Result<GitOperationResult, String> {
+    fn push(
+        &self,
+        path: &str,
+        remote: Option<&str>,
+        force_with_lease: bool,
+    ) -> Result<GitOperationResult, String> {
         let root = self.required_root(path)?;
         let status = self.status(path)?;
         let branch = status
@@ -373,6 +378,9 @@ impl GitService {
             .ok_or_else(|| "分离 HEAD 状态下不能从面板推送".to_string())?;
         let mut command = self.command(&root)?;
         command.arg("push");
+        if force_with_lease {
+            command.arg("--force-with-lease");
+        }
         if status.upstream.is_none() {
             let remote = remote
                 .map(str::trim)
@@ -390,7 +398,14 @@ impl GitService {
         let output = command
             .output()
             .map_err(|error| format!("无法推送：{error}"))?;
-        operation_result(output, "推送完成")
+        operation_result(
+            output,
+            if force_with_lease {
+                "安全强制推送完成"
+            } else {
+                "推送完成"
+            },
+        )
     }
 }
 
@@ -643,9 +658,10 @@ pub async fn git_push(
     service: State<'_, GitService>,
     path: String,
     remote: Option<String>,
+    force_with_lease: bool,
 ) -> Result<GitOperationResult, String> {
     let service = service.inner().clone();
-    run_blocking(move || service.push(&path, remote.as_deref())).await
+    run_blocking(move || service.push(&path, remote.as_deref(), force_with_lease)).await
 }
 
 #[cfg(test)]
@@ -685,6 +701,65 @@ mod tests {
         assert!(branches[0].current);
         assert_eq!(branches[0].upstream.as_deref(), Some("origin/feature"));
         assert!(!branches[1].current);
+    }
+
+    #[test]
+    fn force_push_with_lease_updates_a_rewritten_branch() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let remote_path = remote.path();
+        let service = GitService::new(Some("git".into()));
+        service
+            .checked_output(remote_path, ["init", "--bare"])
+            .unwrap();
+        service.checked_output(path, ["init"]).unwrap();
+        service
+            .checked_output(path, ["config", "user.name", "ShellGrid Test"])
+            .unwrap();
+        service
+            .checked_output(path, ["config", "user.email", "shellgrid@example.invalid"])
+            .unwrap();
+        fs::write(path.join("force.txt"), "initial\n").unwrap();
+        service
+            .stage(path.to_str().unwrap(), &["force.txt".into()])
+            .unwrap();
+        service
+            .commit(path.to_str().unwrap(), "initial", false, false)
+            .unwrap();
+        service
+            .checked_output(
+                path,
+                ["remote", "add", "origin", remote_path.to_str().unwrap()],
+            )
+            .unwrap();
+        service
+            .push(path.to_str().unwrap(), Some("origin"), false)
+            .unwrap();
+
+        fs::write(path.join("force.txt"), "rewritten\n").unwrap();
+        service
+            .stage(path.to_str().unwrap(), &["force.txt".into()])
+            .unwrap();
+        service
+            .commit(path.to_str().unwrap(), "rewritten", true, false)
+            .unwrap();
+        assert!(service.push(path.to_str().unwrap(), None, false).is_err());
+        service.push(path.to_str().unwrap(), None, true).unwrap();
+
+        let branch = service
+            .status(path.to_str().unwrap())
+            .unwrap()
+            .branch
+            .unwrap();
+        let local_head = service.checked_output(path, ["rev-parse", "HEAD"]).unwrap();
+        let remote_head = service
+            .checked_output(remote_path, ["rev-parse", branch.as_str()])
+            .unwrap();
+        assert_eq!(local_head.stdout, remote_head.stdout);
     }
 
     #[test]

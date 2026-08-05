@@ -67,6 +67,8 @@ button { font: inherit; color: inherit; }
 .git-empty span { max-width: 230px; font-size: 10px; line-height: 1.5; }
 .git-repository-bar { height: 34px; display: flex; flex: 0 0 34px; align-items: center; gap: 5px; padding: 0 7px 0 10px; border-block: 1px solid #2a3035; background: #191e22; }
 .git-repository-bar > svg { flex: 0 0 auto; color: #8ab59a; }
+.git-repository-bar .git-force-push:not(:disabled) { color: #c97980; }
+.git-repository-bar .git-force-push:not(:disabled):hover { border-color: #6b3940; background: #2a1b1e; color: #ef9299; }
 .git-repository-bar select { min-width: 0; height: 24px; flex: 1; padding: 0 5px; border: 1px solid transparent; border-radius: 3px; background: #20262b; color: #d4d9dd; font-size: 11px; }
 .git-repository-bar select:focus, .git-inline-form input:focus, .git-inline-form select:focus, .git-commit textarea:focus { border-color: #6ca382; outline: none; }
 .git-detached { min-width: 0; flex: 1; color: #e5c07b; font-size: 11px; }

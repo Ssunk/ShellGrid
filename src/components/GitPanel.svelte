@@ -12,6 +12,7 @@
     Minus,
     Plus,
     RefreshCw,
+    ShieldAlert,
     Undo2,
     X,
   } from "lucide-svelte";
@@ -172,13 +173,22 @@
       showRemotePicker = true;
       return;
     }
-    await mutate("git_push", { remote: null }, "正在推送...");
+    await mutate("git_push", { remote: null, forceWithLease: false }, "正在推送...");
   }
 
   async function pushWithUpstream(): Promise<void> {
-    if (await mutate("git_push", { remote: selectedRemote }, "正在建立 upstream 并推送...")) {
+    if (await mutate("git_push", { remote: selectedRemote, forceWithLease: false }, "正在建立 upstream 并推送...")) {
       showRemotePicker = false;
     }
+  }
+
+  async function forcePush(): Promise<void> {
+    if (!status?.branch || !status.upstream) return;
+    const confirmed = window.confirm(
+      `确定将“${status.branch}”安全强制推送到“${status.upstream}”吗？\n\n将使用 git push --force-with-lease；如果远端已有未获取的新提交，Git 会拒绝推送。`,
+    );
+    if (!confirmed) return;
+    await mutate("git_push", { remote: null, forceWithLease: true }, "正在安全强制推送...");
   }
 
   function handleCommitKey(event: KeyboardEvent): void {
@@ -227,6 +237,7 @@
       <button class="icon-button" title="新建并切换分支" disabled={Boolean(operation)} on:click={() => (showNewBranch = !showNewBranch)}><Plus size={15} /></button>
       <button class="icon-button" title={status.upstream ? "拉取（仅快进）" : "当前分支没有 upstream"} disabled={Boolean(operation) || !status.upstream} on:click={() => void mutate("git_pull", {}, "正在拉取...")}><ArrowDownToLine size={15} /></button>
       <button class="icon-button" title="推送" disabled={Boolean(operation) || status.detached} on:click={() => void push()}><ArrowUpFromLine size={15} /></button>
+      <button class="icon-button git-force-push" title={status.upstream ? "安全强制推送（--force-with-lease）" : "当前分支没有 upstream，无法强制推送"} disabled={Boolean(operation) || status.detached || !status.upstream} on:click={() => void forcePush()}><ShieldAlert size={15} /></button>
     </section>
 
     {#if showNewBranch}
