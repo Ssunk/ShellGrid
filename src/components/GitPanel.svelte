@@ -15,7 +15,7 @@
     Undo2,
     X,
   } from "lucide-svelte";
-  import { diffLineKind, fileName, gitStatusLabel, operationPaths, parentPath, restorePaths, stagedFiles, workingFiles } from "../lib/git";
+  import { diffLineKind, fileName, gitStatusLabel, operationPaths, parentPath, restorePaths, stagedFiles, updateGitPanelError, visibleGitPanelError, workingFiles } from "../lib/git";
   import type { GitDiff, GitFileStatus, GitOperationResult, GitStatus } from "../lib/types";
 
   export let path: string;
@@ -27,6 +27,7 @@
   let working: GitFileStatus[] = [];
   let refreshing = false;
   let operation = "";
+  let errors = { action: "", refresh: "" };
   let error = "";
   let notice = "";
   let commitMessage = "";
@@ -41,11 +42,14 @@
   let diffLoading = false;
   let loadedPath = "";
 
+  $: error = visibleGitPanelError(errors);
   $: staged = status ? stagedFiles(status.files) : [];
   $: working = status ? workingFiles(status.files) : [];
   $: if (path && path !== loadedPath) {
     loadedPath = path;
     status = null;
+    errors = { action: "", refresh: "" };
+    notice = "";
     selectedFile = null;
     diff = null;
     amend = false;
@@ -72,25 +76,25 @@
       const next = await invoke<GitStatus>("git_status", { path: requestedPath });
       if (path === requestedPath) {
         status = next;
-        error = "";
+        errors = updateGitPanelError(errors, "refresh", "");
       }
     } catch (reason) {
-      error = messageOf(reason);
+      errors = updateGitPanelError(errors, "refresh", messageOf(reason));
     } finally {
       refreshing = false;
     }
   }
 
   async function openDiff(file: GitFileStatus, stagedVersion: boolean): Promise<void> {
+    errors = updateGitPanelError(errors, "action", "");
     selectedFile = { file, staged: stagedVersion };
     diff = null;
     if (!stagedVersion && file.indexStatus === "?") return;
     diffLoading = true;
     try {
       diff = await invoke<GitDiff>("git_diff", { path, filePath: file.path, staged: stagedVersion });
-      error = "";
     } catch (reason) {
-      error = messageOf(reason);
+      errors = updateGitPanelError(errors, "action", messageOf(reason));
     } finally {
       diffLoading = false;
     }
@@ -99,7 +103,7 @@
   async function mutate(command: string, args: Record<string, unknown>, label: string): Promise<boolean> {
     if (operation) return false;
     operation = label;
-    error = "";
+    errors = updateGitPanelError(errors, "action", "");
     notice = "";
     try {
       const result = await invoke<GitOperationResult>(command, { path, ...args });
@@ -108,7 +112,7 @@
       diff = null;
       return true;
     } catch (reason) {
-      error = messageOf(reason);
+      errors = updateGitPanelError(errors, "action", messageOf(reason));
       return false;
     } finally {
       operation = "";
@@ -161,7 +165,7 @@
     if (!status) return;
     if (!status.upstream) {
       if (status.remotes.length === 0) {
-        error = "仓库没有可用远端，请先在终端配置 remote";
+        errors = updateGitPanelError(errors, "action", "仓库没有可用远端，请先在终端配置 remote");
         return;
       }
       selectedRemote = status.remotes.includes("origin") ? "origin" : status.remotes[0];
@@ -245,7 +249,12 @@
     {/if}
 
     {#if operation}<div class="git-progress">{operation}</div>{/if}
-    {#if error}<div class="git-message error">{error}</div>{/if}
+    {#if error}
+      <div class="git-message error" role="alert">
+        <span>{error}</span>
+        <button class="icon-button" aria-label="关闭 Git 错误提示" title="关闭错误提示" on:click={() => (errors = { action: "", refresh: "" })}><X size={13} /></button>
+      </div>
+    {/if}
     {#if notice}<div class="git-message">{notice}</div>{/if}
 
     <div class="git-scroll">

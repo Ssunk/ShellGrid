@@ -1,5 +1,18 @@
 import type { GitFileStatus } from "./types";
 
+export interface GitPanelErrors {
+  action: string;
+  refresh: string;
+}
+
+export function updateGitPanelError(errors: GitPanelErrors, source: keyof GitPanelErrors, message: string): GitPanelErrors {
+  return { ...errors, [source]: message };
+}
+
+export function visibleGitPanelError(errors: GitPanelErrors): string {
+  return errors.action || errors.refresh;
+}
+
 export function stagedFiles(files: GitFileStatus[]): GitFileStatus[] {
   return files.filter((file) => file.indexStatus !== "." && file.indexStatus !== "?");
 }

@@ -77,7 +77,9 @@ button { font: inherit; color: inherit; }
 .remote-picker select { max-width: 115px; }
 .git-progress { padding: 6px 10px; border-bottom: 1px solid #3d4834; background: #1c2118; color: #d3c98a; font-size: 10px; }
 .git-message { max-height: 70px; overflow: auto; padding: 6px 10px; border-bottom: 1px solid #31503d; background: #17231b; color: #94c8a7; font-size: 10px; line-height: 1.4; white-space: pre-wrap; }
-.git-message.error { border-color: #583238; background: #251719; color: #ea8f96; }
+.git-message.error { display: flex; align-items: flex-start; gap: 6px; border-color: #583238; background: #251719; color: #ea8f96; }
+.git-message.error > span { min-width: 0; flex: 1; white-space: pre-wrap; }
+.git-message.error .icon-button { width: 20px; height: 20px; flex: 0 0 20px; margin: -2px -4px -2px 0; color: #c97980; }
 .git-scroll { min-height: 0; flex: 1; overflow: auto; scrollbar-color: #3b454c #14181b; }
 .git-change-group { border-bottom: 1px solid #292f34; }
 .git-change-group > header, .git-diff-view > header { height: 29px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; background: #181d20; color: #aeb7be; font-size: 11px; }
