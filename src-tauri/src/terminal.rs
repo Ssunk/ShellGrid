@@ -135,6 +135,7 @@ struct Session {
     input: mpsc::Sender<Vec<u8>>,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    process_id: u32,
     _job: Job,
 }
 
@@ -246,6 +247,7 @@ impl TerminalServer {
             input: spawn_input_writer(writer),
             master: Arc::new(Mutex::new(pair.master)),
             killer: Mutex::new(child.clone_killer()),
+            process_id,
             _job: job,
         };
         self.sessions
@@ -335,6 +337,17 @@ impl TerminalServer {
         result
     }
 
+    fn set_priority(&self, session_id: Uuid, focused: bool) -> Result<(), String> {
+        let process_id = {
+            let sessions = self.sessions.lock().map_err(|_| "会话表已损坏")?;
+            sessions
+                .get(&session_id)
+                .ok_or("终端会话不存在")?
+                .process_id
+        };
+        set_process_priority_class(process_id, focused)
+    }
+
     fn close(&self, session_id: Uuid) -> Result<(), String> {
         let session = self
             .sessions
@@ -403,6 +416,36 @@ fn spawn_input_writer(mut writer: Box<dyn Write + Send>) -> mpsc::Sender<Vec<u8>
         }
     });
     sender
+}
+
+// 把前台会话恢复为 NORMAL、后台会话降为 BELOW_NORMAL。Windows 子进程继承父进程的
+// 优先级类，因此调整 pwsh 即可影响整棵进程树。失败（如进程刚退出）由调用方静默处理。
+#[cfg(windows)]
+fn set_process_priority_class(process_id: u32, focused: bool) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{
+            OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+            PROCESS_SET_INFORMATION,
+        },
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_SET_INFORMATION, false, process_id)
+            .map_err(|error| error.to_string())?;
+        let priority = if focused {
+            NORMAL_PRIORITY_CLASS
+        } else {
+            BELOW_NORMAL_PRIORITY_CLASS
+        };
+        let result = SetPriorityClass(handle, priority);
+        let _ = CloseHandle(handle);
+        result.map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(not(windows))]
+fn set_process_priority_class(_process_id: u32, _focused: bool) -> Result<(), String> {
+    Ok(())
 }
 
 fn is_pwsh(shell: &str) -> bool {
@@ -555,7 +598,8 @@ async fn handle_control(server: &Arc<TerminalServer>, text: &str) {
             session_id,
             focused,
         } => {
-            let _ = (session_id, focused);
+            // 优先级调整是尽力而为：会话刚关闭或进程已退出时静默忽略，不打扰前端。
+            let _ = server.set_priority(session_id, focused);
         }
         ClientMessage::Close { session_id } => {
             if let Err(message) = server.close(session_id) {
@@ -682,6 +726,26 @@ mod tests {
         assert!(proxy_environment(&minimal)
             .iter()
             .all(|(name, _)| *name != "NO_PROXY"));
+    }
+
+    #[test]
+    fn set_priority_rejects_unknown_sessions() {
+        let server = Arc::new(TerminalServer {
+            token: String::new(),
+            url: String::new(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            hub: Arc::new(Hub::new()),
+        });
+        assert!(server.set_priority(Uuid::new_v4(), true).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sets_priority_class_of_a_live_process() {
+        let pid = std::process::id();
+        assert!(set_process_priority_class(pid, true).is_ok());
+        assert!(set_process_priority_class(pid, false).is_ok());
+        assert!(set_process_priority_class(pid, true).is_ok());
     }
 
     #[test]
