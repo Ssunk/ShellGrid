@@ -16,19 +16,43 @@ class TerminalMock {
   paste = vi.fn();
 }
 
+interface SearchAddonMock {
+  onDidChangeResults: ReturnType<typeof vi.fn>;
+  clearDecorations: ReturnType<typeof vi.fn>;
+  findNext: ReturnType<typeof vi.fn>;
+  findPrevious: ReturnType<typeof vi.fn>;
+}
+
+const { searchInstances } = vi.hoisted(() => ({ searchInstances: [] as SearchAddonMock[] }));
+
 vi.mock("@xterm/xterm", () => ({ Terminal: TerminalMock }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit = vi.fn(); } }));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss = vi.fn(); dispose = vi.fn(); } }));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    onDidChangeResults = vi.fn();
+    clearDecorations = vi.fn();
+    findNext = vi.fn();
+    findPrevious = vi.fn();
+    constructor() {
+      searchInstances.push(this as unknown as SearchAddonMock);
+    }
+  },
+}));
+
+function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(),
+    onFocus: vi.fn(), onResize: vi.fn(), onSearchResults: vi.fn(), ...extra,
+  };
+}
 
 describe("terminal registry", () => {
   it("focuses the terminal of a mounted pane without throwing for missing panes", async () => {
     const { disposeTerminal, focusTerminal, getTerminal } = await import("./terminalRegistry");
-    const callbacks = {
-      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(), onFocus: vi.fn(), onResize: vi.fn(),
-    };
-    const entry = getTerminal("focus-pane", callbacks);
+    const entry = getTerminal("focus-pane", makeCallbacks() as never);
     focusTerminal("focus-pane");
     expect(entry.terminal.focus).toHaveBeenCalledTimes(1);
     focusTerminal("missing-pane");
@@ -38,11 +62,8 @@ describe("terminal registry", () => {
 
   it("keeps one terminal instance while its host moves", async () => {
     const { getTerminal, terminalCount } = await import("./terminalRegistry");
-    const callbacks = {
-      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(), onFocus: vi.fn(), onResize: vi.fn(),
-    };
-    const first = getTerminal("stable-pane", callbacks);
-    const second = getTerminal("stable-pane", callbacks);
+    const first = getTerminal("stable-pane", makeCallbacks() as never);
+    const second = getTerminal("stable-pane", makeCallbacks() as never);
     const firstHost = document.createElement("div");
     const secondHost = document.createElement("div");
     first.attach(firstHost);
@@ -56,9 +77,7 @@ describe("terminal registry", () => {
   it("intercepts clipboard images before xterm handles the paste", async () => {
     const { getTerminal } = await import("./terminalRegistry");
     const onPasteImages = vi.fn();
-    const entry = getTerminal("image-pane", {
-      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages, onFocus: vi.fn(), onResize: vi.fn(),
-    });
+    const entry = getTerminal("image-pane", { ...makeCallbacks(), onPasteImages } as never);
     const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "shot.png", { type: "image/png" });
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
@@ -77,9 +96,7 @@ describe("terminal registry", () => {
   it("leaves text paste events for xterm", async () => {
     const { getTerminal } = await import("./terminalRegistry");
     const onPasteImages = vi.fn();
-    const entry = getTerminal("text-pane", {
-      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages, onFocus: vi.fn(), onResize: vi.fn(),
-    });
+    const entry = getTerminal("text-pane", { ...makeCallbacks(), onPasteImages } as never);
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
       value: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }], files: [] },
@@ -89,5 +106,35 @@ describe("terminal registry", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(onPasteImages).not.toHaveBeenCalled();
+  });
+
+  it("searches the pane buffer and clears decorations on empty query", async () => {
+    const { getTerminal, searchInTerminal } = await import("./terminalRegistry");
+    getTerminal("search-pane", makeCallbacks() as never);
+    const addon = searchInstances[searchInstances.length - 1];
+
+    searchInTerminal("search-pane", "pattern", "next");
+    expect(addon.findNext).toHaveBeenCalledWith("pattern", expect.objectContaining({ incremental: true }));
+
+    searchInTerminal("search-pane", "pattern", "previous");
+    expect(addon.findPrevious).toHaveBeenCalled();
+
+    searchInTerminal("search-pane", "   ", "next");
+    expect(addon.clearDecorations).toHaveBeenCalled();
+
+    searchInTerminal("missing-pane", "pattern", "next");
+    expect(addon.findNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports search result counts through the registry callbacks", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const onSearchResults = vi.fn();
+    getTerminal("count-pane", { ...makeCallbacks(), onSearchResults } as never);
+    const addon = searchInstances[searchInstances.length - 1];
+    const listener = addon.onDidChangeResults.mock.calls[0][0] as (results: { resultIndex: number; resultCount: number }) => void;
+
+    listener({ resultIndex: 2, resultCount: 5 });
+
+    expect(onSearchResults).toHaveBeenCalledWith("count-pane", 2, 5);
   });
 });

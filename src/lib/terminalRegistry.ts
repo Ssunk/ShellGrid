@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -20,12 +21,21 @@ interface RegistryCallbacks {
   onPasteImages(paneId: string, images: File[]): void;
   onFocus(paneId: string): void;
   onResize(paneId: string, cols: number, rows: number): void;
+  onSearchResults(paneId: string, current: number, total: number): void;
 }
 
 const terminals = new Map<string, RegisteredTerminal>();
 const renderers = new Map<string, { webgl: boolean }>();
+const searches = new Map<string, SearchAddon>();
 let webglContexts = 0;
 const MAX_WEBGL_CONTEXTS = 4;
+
+const SEARCH_DECORATIONS = {
+  matchBackground: "#3b5e4a",
+  activeMatchBackground: "#5a8f6d",
+  activeMatchColorOverviewRuler: "#8bd5a5",
+  matchOverviewRuler: "#8bd5a5",
+};
 
 export function getTerminal(paneId: string, callbacks: RegistryCallbacks): RegisteredTerminal {
   const existing = terminals.get(paneId);
@@ -101,6 +111,12 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   terminal.onData((data) => callbacks.onInput(paneId, data));
   terminal.onTitleChange((title) => callbacks.onTitle(paneId, title));
   terminal.onResize(({ cols, rows }) => callbacks.onResize(paneId, cols, rows));
+  const search = new SearchAddon();
+  search.onDidChangeResults((results) => {
+    callbacks.onSearchResults(paneId, results.resultIndex, results.resultCount);
+  });
+  terminal.loadAddon(search);
+  searches.set(paneId, search);
   terminal.parser.registerOscHandler(9, (data) => {
     if (data.startsWith("9;")) callbacks.onCwd(paneId, data.slice(2));
     return true;
@@ -182,12 +198,27 @@ export function clearTerminal(paneId: string): void {
   terminals.get(paneId)?.terminal.clear();
 }
 
+/** 在当前窗格的滚动缓冲中搜索；空查询清除高亮装饰。 */
+export function searchInTerminal(paneId: string, query: string, direction: "next" | "previous"): void {
+  const addon = searches.get(paneId);
+  if (!addon) return;
+  const trimmed = query.trim();
+  if (!trimmed) {
+    addon.clearDecorations();
+    return;
+  }
+  const options = { incremental: true, decorations: SEARCH_DECORATIONS };
+  if (direction === "next") addon.findNext(trimmed, options);
+  else addon.findPrevious(trimmed, options);
+}
+
 export function disposeTerminal(paneId: string): void {
   const entry = terminals.get(paneId);
   if (!entry) return;
   entry.terminal.dispose();
   entry.container.remove();
   terminals.delete(paneId);
+  searches.delete(paneId);
   const renderer = renderers.get(paneId);
   renderers.delete(paneId);
   if (renderer?.webgl) {

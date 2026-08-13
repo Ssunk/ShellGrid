@@ -55,8 +55,13 @@ button { font: inherit; color: inherit; }
 .proxy-hint, .proxy-error { margin: 0; font-size: 10px; line-height: 1.5; }
 .proxy-hint { color: #75808a; }
 .proxy-error { color: #e07b82; }
-.workbench { display: flex; min-width: 0; min-height: 0; flex: 1; }
+.workbench { display: flex; min-width: 0; min-height: 0; flex: 1; position: relative; }
 .workspace { min-width: 0; min-height: 0; flex: 1; padding: 7px; background: #0c0f11; }
+.search-overlay { position: absolute; top: 12px; left: 50%; z-index: 30; display: flex; align-items: center; gap: 5px; padding: 6px 7px; border: 1px solid #39424a; border-radius: 8px; background: #1b2126; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); transform: translateX(-50%); }
+.search-overlay input { width: 300px; height: 26px; padding: 0 8px; border: 1px solid #333b42; border-radius: 4px; background: #12161a; color: #d6d9dc; font-size: 12px; }
+.search-overlay input:focus { border-color: #6ca382; outline: none; }
+.search-count { min-width: 52px; color: #88939c; font-size: 10px; text-align: center; white-space: nowrap; }
+.search-count.zero { color: #e07b82; }
 .git-panel { width: 340px; min-width: 280px; max-width: 38vw; min-height: 0; display: flex; flex: 0 0 340px; flex-direction: column; overflow: hidden; border-right: 1px solid #30373d; background: #14181b; color: #c9cfd4; }
 .git-panel-header { height: 38px; display: flex; flex: 0 0 38px; align-items: center; gap: 8px; padding: 0 7px 0 11px; border-bottom: 1px solid #2a3035; color: #9fc8ad; }
 .git-panel-header strong { min-width: 0; flex: 1; color: #e4e8ea; font-size: 12px; font-weight: 650; }

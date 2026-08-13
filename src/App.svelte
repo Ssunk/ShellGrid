@@ -4,14 +4,14 @@
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount, setContext } from "svelte";
-  import { Columns2, Download, FolderOpen, GitBranch, Globe, Info, Rows2, Save, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Columns2, Download, FolderOpen, GitBranch, Globe, Info, Rows2, Save, Search, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
   import GitPanel from "./components/GitPanel.svelte";
   import LayoutNode from "./components/LayoutNode.svelte";
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -54,6 +54,12 @@
   let unlistenClose: (() => void) | undefined;
   let currentRoot = "C:\\";
   let workspaceEpoch = 0;
+  let searchOpen = false;
+  let searchPaneId = "";
+  let searchQuery = "";
+  let searchIndex = 0;
+  let searchTotal = 0;
+  let searchInput: HTMLInputElement | undefined;
 
   $: currentRoot = workspaceRoot(workspace);
 
@@ -89,6 +95,11 @@
         onPasteImages: (id, images) => void pasteImages(id, images),
         onFocus: (id) => controller.setActivePane(id),
         onResize: (id, cols, rows) => terminalClient?.resize(id, cols, rows),
+        onSearchResults: (id, current, total) => {
+          if (id !== searchPaneId) return;
+          searchIndex = current;
+          searchTotal = total;
+        },
       });
       entry.attach(host);
       if (paneId === activePaneId) entry.setFocused(true);
@@ -212,6 +223,7 @@
     sessions = remainingSessions;
     activePaneId = paneIds(nextLayout)[0];
     focusTerminal(activePaneId);
+    if (searchPaneId === paneId) closeSearch();
     markDirty();
   }
 
@@ -321,6 +333,7 @@
       workspaceEpoch += 1;
       errorMessage = "";
       showGit = true;
+      closeSearch();
       await persist();
     } catch (reason) {
       errorMessage = typeof reason === "string" ? reason : "无法打开工作区文件夹";
@@ -374,16 +387,56 @@
     if (updateInfo) void invoke("open_external", { url: updateInfo.url });
   }
 
+  function toggleSearch(): void {
+    if (searchOpen) {
+      closeSearch();
+      return;
+    }
+    searchOpen = true;
+    searchPaneId = activePaneId;
+    searchQuery = "";
+    searchIndex = 0;
+    searchTotal = 0;
+    window.setTimeout(() => searchInput?.focus(), 0);
+  }
+
+  function closeSearch(): void {
+    searchInTerminal(searchPaneId, "", "next");
+    searchOpen = false;
+    searchPaneId = "";
+  }
+
+  function runSearch(direction: "next" | "previous"): void {
+    if (!searchQuery) return;
+    searchInTerminal(searchPaneId, searchQuery, direction);
+  }
+
+  function handleSearchKey(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runSearch(event.shiftKey ? "previous" : "next");
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeSearch();
+    }
+  }
+
   function handleShortcut(event: KeyboardEvent): void {
     // 使用 Ctrl+Shift 组合；Ctrl+Alt 在部分键盘布局上等价于 AltGr，会拦截正常字符输入。
     if (!event.ctrlKey || !event.shiftKey || event.altKey) return;
-    // 在 Git 面板等输入控件中打字时（如提交信息、新分支名）不触发窗格快捷键。
+    // Git 面板等输入控件中不触发快捷键；xterm 自身的隐藏 textarea 属于终端表面，
+    // 必须放行，否则终端聚焦时 Ctrl+Shift+W/H/V/F 会全部失效。
     const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+    if (
+      target &&
+      !target.closest(".terminal-surface") &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)
+    ) return;
     const key = event.key.toLowerCase();
     if (key === "h") createFromToolbar("horizontal");
     else if (key === "v") createFromToolbar("vertical");
     else if (key === "w") close(activePaneId);
+    else if (key === "f") toggleSearch();
     else return;
     event.preventDefault();
     event.stopPropagation();
@@ -409,6 +462,7 @@
     <div class="toolbar-spacer"></div>
     <span class="pane-count">{paneIds(workspace.layout).length} / {MAX_PANES} 窗格</span>
     <span class:dirty={saveState !== "saved"} class="save-indicator">{saveState === "saved" ? "已保存" : saveState === "saving" ? "保存中" : "待保存"}</span>
+    <button class="icon-button toolbar-search" title="搜索终端输出 (Ctrl+Shift+F)" on:click={toggleSearch}><Search size={17} /></button>
     <button class="icon-button toolbar-proxy" class:proxy-on={Boolean(workspace.proxy?.enabled)} title={workspace.proxy?.enabled ? "网络代理（已启用）" : "网络代理"} on:click={toggleProxy}><Globe size={17} /></button>
     <button class="icon-button toolbar-info" title="运行环境" on:click={toggleInfo}><Info size={17} /></button>
   </header>
@@ -427,6 +481,24 @@
       <span>发现新版本 {updateInfo.version}（当前 v{appVersion}），请从发布页下载安装包更新。</span>
       <button class="notice-action" on:click={openReleasePage}>查看发布页</button>
       <button class="icon-button" title="忽略此版本" on:click={dismissUpdate}><X size={15} /></button>
+    </div>
+  {/if}
+
+  {#if searchOpen}
+    <div class="search-overlay">
+      <input
+        bind:this={searchInput}
+        bind:value={searchQuery}
+        aria-label="搜索终端输出"
+        placeholder="搜索终端输出（Enter 下一个，Shift+Enter 上一个）"
+        spellcheck="false"
+        on:input={() => runSearch("next")}
+        on:keydown={handleSearchKey}
+      />
+      <span class="search-count" class:zero={searchTotal === 0}>{searchTotal > 0 ? `${searchIndex + 1} / ${searchTotal}` : "无匹配"}</span>
+      <button class="icon-button" title="上一个（Shift+Enter）" on:click={() => runSearch("previous")}><ChevronUp size={15} /></button>
+      <button class="icon-button" title="下一个（Enter）" on:click={() => runSearch("next")}><ChevronDown size={15} /></button>
+      <button class="icon-button" title="关闭（Esc）" on:click={closeSearch}><X size={15} /></button>
     </div>
   {/if}
 
