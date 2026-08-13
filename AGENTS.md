@@ -134,3 +134,4 @@ npm run tauri build
 - 常用类型包括 `feat`、`fix`、`chore`、`docs`、`test`、`refactor`、`perf`、`build` 和 `ci`；根据提交的主要目的选择单一类型。
 - 标题应准确概括本次改动，保持单行、简洁，不以句号结尾；除非模块范围确有必要且符合近期历史，否则不添加 scope。
 - 示例：`feat: 支持向 Agent CLI 粘贴剪贴板图片`、`fix: 修复新窗格 Agent 错位`、`chore: 发布 v0.2.1`。
+- 提交信息不得包含 `Co-Authored-By` 或任何 AI 工具署名尾注。
