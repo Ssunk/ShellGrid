@@ -210,7 +210,7 @@ pub fn save(path: &Path, workspace: &WorkspaceStateV1) -> Result<(), String> {
 fn preserve_corrupt(path: &Path) {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.as_secs());
+        .map_or(0, |value| value.as_millis());
     let corrupt = path.with_file_name(format!("workspace.corrupt-{stamp}.json"));
     let _ = fs::rename(path, corrupt);
 }

@@ -99,6 +99,16 @@ impl GitService {
             .map_err(|error| format!("无法启动 Git：{error}"))
     }
 
+    /// 用户提供的文件路径一律按字面路径处理，避免文件名中的 `*`、`[`、`?`
+    /// 等字符被 Git pathspec 当作通配符展开而误伤其他文件。
+    fn literal_pathspec(path: &str) -> String {
+        format!(":(literal){path}")
+    }
+
+    fn literal_paths(paths: &[String]) -> impl Iterator<Item = String> + '_ {
+        paths.iter().map(|path| Self::literal_pathspec(path))
+    }
+
     fn checked_output<I, S>(&self, cwd: &Path, args: I) -> Result<Output, String>
     where
         I: IntoIterator<Item = S>,
@@ -207,7 +217,7 @@ impl GitService {
         }
         let output = command
             .arg("--")
-            .arg(file_path)
+            .arg(Self::literal_pathspec(file_path))
             .output()
             .map_err(|error| format!("无法读取差异：{error}"))?;
         if !output.status.success() {
@@ -232,7 +242,13 @@ impl GitService {
     /// 这里直接读取工作树文件，构造与“新增文件”一致的差异文本用于预览。
     fn untracked_file_diff(&self, root: &Path, file_path: &str) -> Result<Option<GitDiff>, String> {
         let tracked = self
-            .output(root, ["ls-files", "--error-unmatch", "--", file_path])?
+            .output(
+                root,
+                ["ls-files", "--error-unmatch", "--"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .chain(std::iter::once(Self::literal_pathspec(file_path))),
+            )?
             .status
             .success();
         if tracked {
@@ -284,7 +300,7 @@ impl GitService {
         let mut command = self.command(&root)?;
         let output = command
             .args(["add", "--"])
-            .args(paths)
+            .args(Self::literal_paths(paths))
             .output()
             .map_err(|error| format!("无法暂存文件：{error}"))?;
         operation_result(output, "已暂存所选文件")
@@ -303,7 +319,7 @@ impl GitService {
             command.args(["rm", "--cached", "-r", "--"]);
         }
         let output = command
-            .args(paths)
+            .args(Self::literal_paths(paths))
             .output()
             .map_err(|error| format!("无法取消暂存：{error}"))?;
         operation_result(output, "已取消暂存所选文件")
@@ -317,7 +333,7 @@ impl GitService {
         let mut command = self.command(&root)?;
         let output = command
             .args(["restore", "--worktree", "--"])
-            .args(paths)
+            .args(Self::literal_paths(paths))
             .output()
             .map_err(|error| format!("无法恢复工作树文件：{error}"))?;
         operation_result(output, "已恢复所选文件")
@@ -854,6 +870,70 @@ mod tests {
             .unwrap();
         assert!(blob.binary);
         assert!(blob.content.is_empty());
+    }
+
+    #[test]
+    fn treats_glob_characters_in_filenames_literally_when_git_is_available() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let service = GitService::new(Some("git".into()));
+        service.checked_output(path, ["init"]).unwrap();
+        service
+            .checked_output(path, ["config", "user.name", "ShellGrid Test"])
+            .unwrap();
+        service
+            .checked_output(path, ["config", "user.email", "shellgrid@example.invalid"])
+            .unwrap();
+        service
+            .checked_output(path, ["config", "core.autocrlf", "false"])
+            .unwrap();
+        fs::write(path.join("star[1]file.txt"), "content\n").unwrap();
+        fs::write(path.join("star2file.txt"), "other\n").unwrap();
+
+        // 未跟踪文件预览应命中字面文件名，而不是把 `[1]` 当作字符类展开。
+        let diff = service
+            .diff(path.to_str().unwrap(), "star[1]file.txt", false)
+            .unwrap();
+        assert!(diff.content.contains("diff --git a/star[1]file.txt"));
+        assert!(!diff.content.contains("star2file.txt"));
+
+        service
+            .stage(path.to_str().unwrap(), &["star[1]file.txt".into()])
+            .unwrap();
+        let status = service.status(path.to_str().unwrap()).unwrap();
+        let staged: Vec<&GitFileStatus> = status
+            .files
+            .iter()
+            .filter(|file| file.index_status != "?")
+            .collect();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].path, "star[1]file.txt");
+
+        service
+            .commit(path.to_str().unwrap(), "initial", false, false)
+            .unwrap();
+        fs::write(path.join("star[1]file.txt"), "changed\n").unwrap();
+        service
+            .stage(path.to_str().unwrap(), &["star[1]file.txt".into()])
+            .unwrap();
+        service
+            .unstage(path.to_str().unwrap(), &["star[1]file.txt".into()])
+            .unwrap();
+        let status = service.status(path.to_str().unwrap()).unwrap();
+        assert!(status
+            .files
+            .iter()
+            .all(|file| file.index_status == "." || file.index_status == "?"));
+        service
+            .restore(path.to_str().unwrap(), &["star[1]file.txt".into()])
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(path.join("star[1]file.txt")).unwrap(),
+            "content\n"
+        );
     }
 
     #[test]
