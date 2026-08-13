@@ -97,10 +97,19 @@ button { font: inherit; color: inherit; }
 .git-file-main em { color: #e5c07b; font-size: 10px; font-style: normal; font-weight: 650; }
 .git-file-row > .icon-button { width: 23px; height: 23px; flex: 0 0 23px; }
 .git-group-empty { margin: 0; padding: 9px 11px 11px; color: #66727b; font-size: 10px; line-height: 1.45; }
-.git-diff-view { flex: 0 0 auto; }
-.git-diff-view > header { border-block: 1px solid #31383e; background: #1c2226; }
+.git-panel-resizer, .git-diff-resizer { position: relative; z-index: 2; flex: 0 0 6px; }
+.git-panel-resizer { margin: 0 -2px; cursor: col-resize; }
+.git-diff-resizer { margin: -2px 0; cursor: row-resize; }
+.git-panel-resizer::after, .git-diff-resizer::after { content: ""; position: absolute; background: #272e34; transition: background 120ms ease; }
+.git-panel-resizer::after { inset: 0 2px; }
+.git-diff-resizer::after { inset: 2px 0; }
+.git-panel-resizer:hover::after, .git-panel-resizer:active::after,
+.git-diff-resizer:hover::after, .git-diff-resizer:active::after { background: #6ca382; }
+.git-diff-view { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; }
+.git-diff-view > header { flex: 0 0 auto; border-block: 1px solid #31383e; background: #1c2226; }
 .git-diff-view > header span { min-width: 0; overflow: hidden; flex: 1; color: #bbc3c8; text-overflow: ellipsis; white-space: nowrap; }
-.git-diff-view pre { max-height: 280px; overflow: auto; margin: 0; padding: 8px 9px 10px; background: #0f1214; color: #b7c0c6; font: 10px/1.45 "Cascadia Mono", Consolas, monospace; letter-spacing: 0; tab-size: 2; }
+.git-diff-view pre { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0; padding: 8px 9px 10px; background: #0f1214; color: #b7c0c6; font: 10px/1.45 "Cascadia Mono", Consolas, monospace; letter-spacing: 0; tab-size: 2; }
+.git-diff-view.auto pre { max-height: 280px; }
 .git-diff-view pre span { display: block; min-width: max-content; white-space: pre; }
 .git-diff-view .diff-add { background: #183122; color: #a6d8b7; }
 .git-diff-view .diff-delete { background: #351c20; color: #e9a0a6; }

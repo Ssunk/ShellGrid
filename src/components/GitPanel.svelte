@@ -42,6 +42,10 @@
   let diff: GitDiff | null = null;
   let diffLoading = false;
   let loadedPath = "";
+  const MIN_DIFF_HEIGHT = 120;
+  const MIN_LIST_HEIGHT = 120;
+  let panelWidth: number | null = null;
+  let diffHeight: number | null = null;
 
   $: error = visibleGitPanelError(errors);
   $: staged = status ? stagedFiles(status.files) : [];
@@ -200,9 +204,49 @@
   function messageOf(reason: unknown): string {
     return typeof reason === "string" ? reason : reason instanceof Error ? reason.message : "Git 操作失败";
   }
+
+  function startPanelResize(event: PointerEvent): void {
+    const resizer = event.currentTarget as HTMLElement;
+    const panel = resizer.previousElementSibling as HTMLElement;
+    resizer.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = panel.getBoundingClientRect().width;
+    const move = (moveEvent: PointerEvent) => {
+      panelWidth = Math.min(0.38 * window.innerWidth, Math.max(280, startWidth + (moveEvent.clientX - startX)));
+    };
+    const done = () => {
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", done);
+      resizer.removeEventListener("pointercancel", done);
+    };
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", done);
+    resizer.addEventListener("pointercancel", done);
+  }
+
+  function startDiffResize(event: PointerEvent): void {
+    const resizer = event.currentTarget as HTMLElement;
+    const scroll = resizer.previousElementSibling as HTMLElement;
+    const diffView = resizer.nextElementSibling as HTMLElement;
+    resizer.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const startHeight = diffView.getBoundingClientRect().height;
+    const maxHeight = Math.max(MIN_DIFF_HEIGHT, scroll.getBoundingClientRect().height + startHeight - MIN_LIST_HEIGHT);
+    const move = (moveEvent: PointerEvent) => {
+      diffHeight = Math.min(maxHeight, Math.max(MIN_DIFF_HEIGHT, startHeight + (startY - moveEvent.clientY)));
+    };
+    const done = () => {
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", done);
+      resizer.removeEventListener("pointercancel", done);
+    };
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", done);
+    resizer.addEventListener("pointercancel", done);
+  }
 </script>
 
-<aside class="git-panel" aria-label="Git 源码管理">
+<aside class="git-panel" style:flex-basis={panelWidth === null ? undefined : `${panelWidth}px`} aria-label="Git 源码管理">
   <header class="git-panel-header">
     <FolderGit2 size={17} />
     <strong>源码管理</strong>
@@ -296,7 +340,8 @@
     </div>
 
     {#if selectedFile}
-      <section class="git-diff-view">
+      <div class="git-diff-resizer" role="separator" aria-orientation="horizontal" on:pointerdown={startDiffResize}></div>
+      <section class="git-diff-view" class:auto={diffHeight === null} style:height={diffHeight === null ? undefined : `${diffHeight}px`}>
         <header><span title={selectedFile.file.path}>{selectedFile.staged ? "已暂存差异" : "工作树差异"} · {fileName(selectedFile.file.path)}</span><button class="icon-button" title="关闭差异" on:click={() => { selectedFile = null; diff = null; }}><X size={14} /></button></header>
         {#if diffLoading}<p class="git-group-empty">正在加载差异...</p>
         {:else if diff?.binary}<p class="git-group-empty">二进制文件不显示文本差异。</p>
@@ -318,3 +363,5 @@
     </form>
   {/if}
 </aside>
+
+<div class="git-panel-resizer" role="separator" aria-orientation="vertical" on:pointerdown={startPanelResize}></div>
