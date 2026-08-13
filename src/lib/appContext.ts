@@ -9,6 +9,7 @@ export interface AppController {
   setActivePane(paneId: string): void;
   split(paneId: string, direction: SplitDirection): void;
   close(paneId: string): void;
+  restart(paneId: string): void;
   updateRatio(path: string, ratio: number): void;
   mountTerminal(paneId: string, host: HTMLElement): void;
   resizeTerminal(paneId: string): void;

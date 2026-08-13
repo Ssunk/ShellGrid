@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getContext, onMount } from "svelte";
-  import { SplitSquareHorizontal, SplitSquareVertical, X, SquareTerminal } from "lucide-svelte";
+  import { RefreshCw, SplitSquareHorizontal, SplitSquareVertical, X, SquareTerminal } from "lucide-svelte";
   import { APP_CONTEXT, type AppController } from "../lib/appContext";
   import type { PaneLaunchInfo, SessionState } from "../lib/types";
 
@@ -27,6 +27,11 @@
     <span class:running={session?.running} class:error={Boolean(session?.error)} class="session-status">
       {session?.error ? "错误" : session?.running ? "运行中" : session?.exitCode !== undefined ? `已退出 ${session.exitCode}` : "启动中"}
     </span>
+    {#if session && !session.running}
+      <button class="icon-button" title="重启终端会话" on:click|stopPropagation={() => app.restart(paneId)}>
+        <RefreshCw size={14} />
+      </button>
+    {/if}
     <button class="icon-button" title="左右分割 (Ctrl+Shift+H)" on:click|stopPropagation={() => app.split(paneId, "horizontal")}>
       <SplitSquareHorizontal size={15} />
     </button>

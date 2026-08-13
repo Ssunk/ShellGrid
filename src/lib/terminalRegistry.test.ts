@@ -23,6 +23,19 @@ vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss = vi.fn(); dispose = vi.fn(); } }));
 
 describe("terminal registry", () => {
+  it("focuses the terminal of a mounted pane without throwing for missing panes", async () => {
+    const { disposeTerminal, focusTerminal, getTerminal } = await import("./terminalRegistry");
+    const callbacks = {
+      onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(), onFocus: vi.fn(), onResize: vi.fn(),
+    };
+    const entry = getTerminal("focus-pane", callbacks);
+    focusTerminal("focus-pane");
+    expect(entry.terminal.focus).toHaveBeenCalledTimes(1);
+    focusTerminal("missing-pane");
+    expect(entry.terminal.focus).toHaveBeenCalledTimes(1);
+    disposeTerminal("focus-pane");
+  });
+
   it("keeps one terminal instance while its host moves", async () => {
     const { getTerminal, terminalCount } = await import("./terminalRegistry");
     const callbacks = {

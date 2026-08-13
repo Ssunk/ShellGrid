@@ -11,7 +11,7 @@
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { disposeTerminal, fitTerminal, getTerminal, pasteTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -67,6 +67,7 @@
     },
     split: (paneId, direction) => split(paneId, direction),
     close: (paneId) => close(paneId),
+    restart: (paneId) => restartPane(paneId),
     updateRatio: (path, ratio) => {
       workspace = { ...workspace, layout: updateRatio(workspace.layout, path, ratio) };
       markDirty();
@@ -90,6 +91,7 @@
         onResize: (id, cols, rows) => terminalClient?.resize(id, cols, rows),
       });
       entry.attach(host);
+      if (paneId === activePaneId) entry.setFocused(true);
       void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows, sessionProxy(workspace.proxy));
     },
     resizeTerminal: (paneId) => {
@@ -132,7 +134,9 @@
           scheduleReconnect();
         },
       });
-      await terminalClient.connect();
+      // 连接失败时保留 terminalClient：onDisconnected 驱动的重连逻辑会持续重试。
+      // 只有拿不到 bootstrap（如浏览器预览）才视为没有终端服务，置空客户端。
+      await terminalClient.connect().catch(() => {});
     } catch {
       // Browser preview and a missing WebView command both retain a usable shell workspace.
       terminalClient = undefined;
@@ -143,7 +147,8 @@
     unlistenClose = await appWindow.onCloseRequested(async (event) => {
       event.preventDefault();
       if (Object.values(sessions).some((session) => session.running) && !window.confirm("仍有终端正在运行，确定退出并终止它们吗？")) return;
-      await persist();
+      const saved = await persist();
+      if (!saved && !window.confirm("工作区保存失败，仍要退出吗？")) return;
       const stopListening = unlistenClose;
       unlistenClose = undefined;
       stopListening?.();
@@ -186,6 +191,7 @@
       panes: { ...workspace.panes, [newId]: { ...workspace.panes[paneId], title: undefined } },
     };
     activePaneId = newId;
+    focusTerminal(newId);
     markDirty();
   }
 
@@ -205,7 +211,22 @@
     const { [paneId]: _closedSession, ...remainingSessions } = sessions;
     sessions = remainingSessions;
     activePaneId = paneIds(nextLayout)[0];
+    focusTerminal(activePaneId);
     markDirty();
+  }
+
+  // 会话退出或启动失败后，在同一窗格内用原启动信息重启会话并清空终端显示。
+  function restartPane(paneId: string): void {
+    const size = terminalSize(paneId);
+    sessions = { ...sessions, [paneId]: { paneId, running: false } };
+    clearTerminal(paneId);
+    void terminalClient?.create(
+      paneId,
+      controller.getLaunch(paneId),
+      size?.cols ?? 80,
+      size?.rows ?? 24,
+      sessionProxy(workspace.proxy),
+    );
   }
 
   function markDirty(): void {
@@ -219,8 +240,8 @@
       const paths: string[] = [];
       for (const image of images) {
         if (image.size > MAX_CLIPBOARD_IMAGE_BYTES) throw new Error("剪贴板图片超过 20 MiB 限制");
-        const bytes = Array.from(new Uint8Array(await image.arrayBuffer()));
-        paths.push(await invoke<string>("save_clipboard_image", { bytes }));
+        const bytes = new Uint8Array(await image.arrayBuffer());
+        paths.push(await invoke<string>("save_clipboard_image", { data: bytesToBase64(bytes) }));
       }
       if (paths.length === 0) return;
       const references = paths.map((path) => `[图片文件: "${path}"]`).join(" ");
@@ -232,14 +253,26 @@
     }
   }
 
-  async function persist(): Promise<void> {
+  // 分块拼接避免 String.fromCharCode 在超大数组上爆栈；base64 比 JSON 数字数组的 IPC 载荷小一个数量级。
+  function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK));
+    }
+    return btoa(binary);
+  }
+
+  async function persist(): Promise<boolean> {
     saveState = "saving";
     try {
       await invoke("save_workspace", { workspace });
       saveState = "saved";
+      return true;
     } catch {
       saveState = "dirty";
       errorMessage = "工作区保存失败";
+      return false;
     }
   }
 
@@ -344,6 +377,9 @@
   function handleShortcut(event: KeyboardEvent): void {
     // 使用 Ctrl+Shift 组合；Ctrl+Alt 在部分键盘布局上等价于 AltGr，会拦截正常字符输入。
     if (!event.ctrlKey || !event.shiftKey || event.altKey) return;
+    // 在 Git 面板等输入控件中打字时（如提交信息、新分支名）不触发窗格快捷键。
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
     const key = event.key.toLowerCase();
     if (key === "h") createFromToolbar("horizontal");
     else if (key === "v") createFromToolbar("vertical");

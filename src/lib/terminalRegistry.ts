@@ -159,6 +159,15 @@ export function fitTerminal(paneId: string): void {
   try { entry.fit.fit(); } catch { /* zero-size during a tree update */ }
 }
 
+/** 把键盘焦点交给指定窗格的 xterm；实例不存在或不可见时静默失败。 */
+export function focusTerminal(paneId: string): void {
+  try {
+    terminals.get(paneId)?.setFocused(true);
+  } catch {
+    // 终端正在销毁或尚未挂载时聚焦失败是正常的
+  }
+}
+
 export function terminalSize(paneId: string): { cols: number; rows: number } | undefined {
   const terminal = terminals.get(paneId)?.terminal;
   return terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
@@ -166,6 +175,11 @@ export function terminalSize(paneId: string): { cols: number; rows: number } | u
 
 export function terminalCount(): number {
   return terminals.size;
+}
+
+/** 清空指定窗格终端的显示内容，用于会话重启。 */
+export function clearTerminal(paneId: string): void {
+  terminals.get(paneId)?.terminal.clear();
 }
 
 export function disposeTerminal(paneId: string): void {
