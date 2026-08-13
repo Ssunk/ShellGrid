@@ -293,19 +293,20 @@
         {:else}<p class="git-group-empty">工作树没有未暂存更改</p>{/each}
       </section>
 
-      {#if selectedFile}
-        <section class="git-diff-view">
-          <header><span title={selectedFile.file.path}>{selectedFile.staged ? "已暂存差异" : "工作树差异"} · {fileName(selectedFile.file.path)}</span><button class="icon-button" title="关闭差异" on:click={() => { selectedFile = null; diff = null; }}><X size={14} /></button></header>
-          {#if diffLoading}<p class="git-group-empty">正在加载差异...</p>
-          {:else if diff?.binary}<p class="git-group-empty">二进制文件不显示文本差异。</p>
-          {:else if diff?.content}
-            <pre>{#each diff.content.split("\n") as line}<span class={`diff-${diffLineKind(line)}`}>{line}
-</span>{/each}</pre>
-            {#if diff.truncated}<p class="git-diff-truncated">差异过大，仅显示前 256 KiB。</p>{/if}
-          {:else}<p class="git-group-empty">没有可显示的文本差异。</p>{/if}
-        </section>
-      {/if}
     </div>
+
+    {#if selectedFile}
+      <section class="git-diff-view">
+        <header><span title={selectedFile.file.path}>{selectedFile.staged ? "已暂存差异" : "工作树差异"} · {fileName(selectedFile.file.path)}</span><button class="icon-button" title="关闭差异" on:click={() => { selectedFile = null; diff = null; }}><X size={14} /></button></header>
+        {#if diffLoading}<p class="git-group-empty">正在加载差异...</p>
+        {:else if diff?.binary}<p class="git-group-empty">二进制文件不显示文本差异。</p>
+        {:else if diff?.content}
+          <pre>{#key selectedFile.file.path}{#each diff.content.split("\n") as line}<span class={`diff-${diffLineKind(line)}`}>{line}
+</span>{/each}{/key}</pre>
+          {#if diff.truncated}<p class="git-diff-truncated">差异过大，仅显示前 256 KiB。</p>{/if}
+        {:else}<p class="git-group-empty">没有可显示的文本差异。</p>{/if}
+      </section>
+    {/if}
 
     <form class="git-commit" on:submit|preventDefault={() => void commit()}>
       <textarea aria-label="提交信息" placeholder="提交信息（Ctrl+Enter 提交）" rows="6" bind:value={commitMessage} on:keydown={handleCommitKey}></textarea>
