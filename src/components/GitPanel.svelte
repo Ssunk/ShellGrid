@@ -90,7 +90,6 @@
     errors = updateGitPanelError(errors, "action", "");
     selectedFile = { file, staged: stagedVersion };
     diff = null;
-    if (!stagedVersion && file.indexStatus === "?") return;
     diffLoading = true;
     try {
       diff = await invoke<GitDiff>("git_diff", { path, filePath: file.path, staged: stagedVersion });
@@ -298,7 +297,6 @@
         <section class="git-diff-view">
           <header><span title={selectedFile.file.path}>{selectedFile.staged ? "已暂存差异" : "工作树差异"} · {fileName(selectedFile.file.path)}</span><button class="icon-button" title="关闭差异" on:click={() => { selectedFile = null; diff = null; }}><X size={14} /></button></header>
           {#if diffLoading}<p class="git-group-empty">正在加载差异...</p>
-          {:else if !selectedFile.staged && selectedFile.file.indexStatus === "?"}<p class="git-group-empty">未跟踪文件暂存后可查看标准 Git 差异。</p>
           {:else if diff?.binary}<p class="git-group-empty">二进制文件不显示文本差异。</p>
           {:else if diff?.content}
             <pre>{#each diff.content.split("\n") as line}<span class={`diff-${diffLineKind(line)}`}>{line}

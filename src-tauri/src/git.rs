@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::{
     ffi::OsStr,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -212,6 +213,11 @@ impl GitService {
         if !output.status.success() {
             return Err(git_error(&output));
         }
+        if !staged && output.stdout.is_empty() {
+            if let Some(diff) = self.untracked_file_diff(&root, file_path)? {
+                return Ok(diff);
+            }
+        }
         let truncated = output.stdout.len() > MAX_DIFF_BYTES;
         let content = bounded_text(&output.stdout, MAX_DIFF_BYTES);
         let binary = content.contains("Binary files ") || content.contains("GIT binary patch");
@@ -220,6 +226,54 @@ impl GitService {
             binary,
             truncated,
         })
+    }
+
+    /// 未跟踪的新文件没有可对比的基线，`git diff` 不会输出任何内容。
+    /// 这里直接读取工作树文件，构造与“新增文件”一致的差异文本用于预览。
+    fn untracked_file_diff(&self, root: &Path, file_path: &str) -> Result<Option<GitDiff>, String> {
+        let tracked = self
+            .output(root, ["ls-files", "--error-unmatch", "--", file_path])?
+            .status
+            .success();
+        if tracked {
+            return Ok(None);
+        }
+        let full_path = root.join(file_path);
+        let file = match std::fs::File::open(&full_path) {
+            Ok(file) => file,
+            Err(_) => return Ok(None),
+        };
+        let mut bytes = Vec::with_capacity(8192);
+        let read = file
+            .take(MAX_DIFF_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("无法读取文件 {file_path}：{error}"))?;
+        let truncated = read > MAX_DIFF_BYTES;
+        let binary = bytes[..bytes.len().min(8000)].contains(&0);
+        if binary {
+            return Ok(Some(GitDiff {
+                content: String::new(),
+                binary: true,
+                truncated,
+            }));
+        }
+        let body = bounded_text(&bytes, MAX_DIFF_BYTES);
+        let mut content = format!(
+            "diff --git a/{file_path} b/{file_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{file_path}\n"
+        );
+        if !body.is_empty() {
+            let lines = body.lines().count();
+            content.push_str(&format!("@@ -0,0 +1,{lines} @@\n"));
+            for line in body.split_inclusive('\n') {
+                content.push('+');
+                content.push_str(line);
+            }
+        }
+        Ok(Some(GitDiff {
+            content,
+            binary: false,
+            truncated,
+        }))
     }
 
     fn stage(&self, path: &str, paths: &[String]) -> Result<GitOperationResult, String> {
@@ -763,6 +817,46 @@ mod tests {
     }
 
     #[test]
+    fn previews_untracked_new_files_when_git_is_available() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let service = GitService::new(Some("git".into()));
+        service.checked_output(path, ["init"]).unwrap();
+        service
+            .checked_output(path, ["config", "core.autocrlf", "false"])
+            .unwrap();
+        fs::write(path.join("notes.txt"), "line1\nline2").unwrap();
+        fs::write(path.join("empty.txt"), "").unwrap();
+        fs::write(path.join("blob.bin"), b"\x00\x01\x02").unwrap();
+
+        let notes = service
+            .diff(path.to_str().unwrap(), "notes.txt", false)
+            .unwrap();
+        assert!(!notes.binary);
+        assert!(!notes.truncated);
+        assert!(notes.content.contains("new file mode 100644"));
+        assert!(notes.content.contains("@@ -0,0 +1,2 @@"));
+        assert!(notes.content.contains("+line1\n+line2"));
+        assert!(!notes.content.contains("\\ No newline at end of file"));
+
+        let empty = service
+            .diff(path.to_str().unwrap(), "empty.txt", false)
+            .unwrap();
+        assert!(!empty.binary);
+        assert!(empty.content.contains("diff --git a/empty.txt b/empty.txt"));
+        assert!(!empty.content.contains("@@"));
+
+        let blob = service
+            .diff(path.to_str().unwrap(), "blob.bin", false)
+            .unwrap();
+        assert!(blob.binary);
+        assert!(blob.content.is_empty());
+    }
+
+    #[test]
     fn runs_local_repository_workflow_when_git_is_available() {
         if Command::new("git").arg("--version").output().is_err() {
             return;
@@ -784,6 +878,13 @@ mod tests {
 
         let status = service.status(path.to_str().unwrap()).unwrap();
         assert_eq!(status.files[0].index_status, "?");
+        let untracked = service
+            .diff(path.to_str().unwrap(), "hello world.txt", false)
+            .unwrap();
+        assert!(!untracked.binary);
+        assert!(!untracked.truncated);
+        assert!(untracked.content.contains("new file mode 100644"));
+        assert!(untracked.content.contains("+你好，ShellGrid"));
         service
             .stage(path.to_str().unwrap(), &["hello world.txt".into()])
             .unwrap();
@@ -799,6 +900,10 @@ mod tests {
             .unwrap();
         let clean_status = service.status(path.to_str().unwrap()).unwrap();
         assert!(clean_status.files.is_empty());
+        let unchanged = service
+            .diff(path.to_str().unwrap(), "hello world.txt", false)
+            .unwrap();
+        assert!(unchanged.content.is_empty());
         fs::write(path.join("hello world.txt"), "已暂存版本\n").unwrap();
         service
             .stage(path.to_str().unwrap(), &["hello world.txt".into()])
