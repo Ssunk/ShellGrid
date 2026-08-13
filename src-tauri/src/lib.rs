@@ -63,8 +63,9 @@ fn open_external(url: String) -> Result<(), String> {
 #[tauri::command]
 async fn save_clipboard_image(
     state: tauri::State<'_, RuntimeState>,
-    bytes: Vec<u8>,
+    data: String,
 ) -> Result<String, String> {
+    let bytes = clipboard_image::decode_image_data(&data)?;
     let directory = state
         .workspace_path
         .parent()

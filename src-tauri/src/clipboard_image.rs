@@ -1,3 +1,4 @@
+use base64::Engine;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -7,6 +8,13 @@ use uuid::Uuid;
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// 前端经 Tauri IPC 传来的 base64 载荷；相比 JSON 数字数组可显著缩小传输体积。
+pub fn decode_image_data(data: &str) -> Result<Vec<u8>, String> {
+    base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .map_err(|_| "剪贴板图片数据无效".to_string())
+}
 
 pub fn save(directory: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     if bytes.is_empty() {
@@ -105,5 +113,21 @@ mod tests {
         assert!(save(directory.path(), b"plain text").is_err());
         let oversized = vec![0_u8; MAX_IMAGE_BYTES + 1];
         assert!(save(directory.path(), &oversized).is_err());
+    }
+
+    #[test]
+    fn decodes_base64_payload_before_saving() {
+        use base64::Engine;
+        let directory = tempfile::tempdir().unwrap();
+        let png = b"\x89PNG\r\n\x1a\npayload";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+        let bytes = decode_image_data(&encoded).unwrap();
+        assert_eq!(bytes, png);
+        let path = save(directory.path(), &bytes).unwrap();
+        assert_eq!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("png")
+        );
+        assert!(decode_image_data("not-base64!!").is_err());
     }
 }
