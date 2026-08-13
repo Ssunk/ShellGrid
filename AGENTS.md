@@ -67,7 +67,7 @@ ShellGrid 是 Windows x64 专用的多终端桌面应用，技术栈为 Tauri 2�
 
 ## 当前已知边界
 
-- Rust 端目前接收 `set_priority`，但处理分支是空操作。当前只有前端 8ms/33ms 显示批处理，不代表后台 PowerShell 的 Windows 进程优先级已降低。
+- Rust 端已通过 `set_priority` 将后台窗格的 PowerShell 进程优先级降为 BELOW_NORMAL、前台恢复 NORMAL（子进程继承优先级类）；这与前端 8ms/33ms 的显示批处理是相互独立的两套机制。
 - 尚未完成自动化真实 ConPTY 集成测试。
 - Codex、Claude Code、Gemini CLI 的完整交互回归以及 16 会话 CPU、内存、延迟基准尚未形成可重复的验收结果。
 - 首版不支持终端图片协议、多命名工作区、云同步或结构化聊天面板。
