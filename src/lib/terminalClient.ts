@@ -83,7 +83,10 @@ export class TerminalClient {
   ): Promise<void> {
     this.closingPanes.delete(paneId);
     if (this.sessions.has(paneId) || [...this.requests.values()].includes(paneId)) return;
-    await this.connect();
+    // 连接失败不在此处抛出：重连由 onDisconnected → scheduleReconnect 驱动，
+    // 重连成功后 reconnect() 会为所有窗格重新 create，这里静默放弃即可。
+    await this.connect().catch(() => {});
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
     const requestId = crypto.randomUUID();
     this.requests.set(requestId, paneId);
     // proxy 为 undefined 时 JSON.stringify 会省略该字段，Rust 端反序列化为 None。

@@ -255,8 +255,13 @@ impl TerminalServer {
         Ok((session_id, reader, child))
     }
 
-    fn spawn_output(self: &Arc<Self>, session_id: Uuid, mut reader: Box<dyn Read + Send>) {
-        let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(SESSION_QUEUE_DEPTH);
+    fn spawn_output(
+        self: &Arc<Self>,
+        session_id: Uuid,
+        mut reader: Box<dyn Read + Send>,
+        exit_code: mpsc::Receiver<u32>,
+    ) {
+        let (sender, receiver) = mpsc::channel::<Vec<u8>>(SESSION_QUEUE_DEPTH);
         thread::spawn(move || {
             let mut buffer = vec![0_u8; OUTPUT_CHUNK_SIZE];
             loop {
@@ -268,24 +273,18 @@ impl TerminalServer {
             }
         });
         let hub = self.hub.clone();
-        tauri::async_runtime::spawn(async move {
-            while let Some(chunk) = receiver.recv().await {
-                let mut frame = Vec::with_capacity(17 + chunk.len());
-                frame.push(2);
-                frame.extend_from_slice(session_id.as_bytes());
-                frame.extend_from_slice(&chunk);
-                hub.send(ServerFrame::Binary(frame)).await;
-            }
-        });
+        tauri::async_runtime::spawn(forward_output_and_exit(
+            hub, session_id, receiver, exit_code,
+        ));
     }
 
     fn spawn_exit_watcher(
         self: &Arc<Self>,
         session_id: Uuid,
         mut child: Box<dyn Child + Send + Sync>,
+        exit_sender: mpsc::Sender<u32>,
     ) {
         let sessions: Weak<Mutex<HashMap<Uuid, Session>>> = Arc::downgrade(&self.sessions);
-        let hub = self.hub.clone();
         thread::spawn(move || {
             let exit_code = child.wait().map_or(1, |status| status.exit_code());
             if let Some(sessions) = sessions.upgrade() {
@@ -293,13 +292,9 @@ impl TerminalServer {
                     sessions.remove(&session_id);
                 }
             }
-            tauri::async_runtime::spawn(async move {
-                hub.json(&ServerMessage::Exit {
-                    session_id,
-                    exit_code,
-                })
-                .await;
-            });
+            // 退出码交给输出转发任务，由它在输出全部排空后统一发送 Exit，
+            // 保证前端先收到该会话的全部输出，再收到退出消息。
+            let _ = exit_sender.blocking_send(exit_code);
         });
     }
 
@@ -370,6 +365,29 @@ impl TerminalServer {
                 }
             }
         }
+    }
+}
+
+// 先转发完该会话的全部输出，再发送 Exit，保证输出顺序完整、不丢尾部数据。
+async fn forward_output_and_exit(
+    hub: Arc<Hub>,
+    session_id: Uuid,
+    mut chunks: mpsc::Receiver<Vec<u8>>,
+    mut exit_code: mpsc::Receiver<u32>,
+) {
+    while let Some(chunk) = chunks.recv().await {
+        let mut frame = Vec::with_capacity(17 + chunk.len());
+        frame.push(2);
+        frame.extend_from_slice(session_id.as_bytes());
+        frame.extend_from_slice(&chunk);
+        hub.send(ServerFrame::Binary(frame)).await;
+    }
+    if let Some(code) = exit_code.recv().await {
+        hub.json(&ServerMessage::Exit {
+            session_id,
+            exit_code: code,
+        })
+        .await;
     }
 }
 
@@ -501,8 +519,9 @@ async fn handle_control(server: &Arc<TerminalServer>, text: &str) {
                             session_id,
                         })
                         .await;
-                    server.spawn_output(session_id, reader);
-                    server.spawn_exit_watcher(session_id, child);
+                    let (exit_sender, exit_receiver) = mpsc::channel(1);
+                    server.spawn_output(session_id, reader, exit_receiver);
+                    server.spawn_exit_watcher(session_id, child, exit_sender);
                 }
                 Err(message) => {
                     server
@@ -577,6 +596,13 @@ use axum::response::IntoResponse;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn binary_payload(frame: &ServerFrame) -> &[u8] {
+        match frame {
+            ServerFrame::Binary(bytes) => &bytes[17..],
+            _ => panic!("expected binary frame"),
+        }
+    }
 
     #[test]
     fn detects_pwsh_paths() {
@@ -683,6 +709,89 @@ mod tests {
                 })
                 .collect();
             assert_eq!(order, ["first", "second"]);
+        });
+    }
+
+    #[test]
+    fn exit_arrives_after_all_output() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let hub = Arc::new(Hub::new());
+            let (sender, mut receiver) = mpsc::channel::<ServerFrame>(64);
+            hub.attach(sender);
+            let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(8);
+            let (exit_tx, exit_rx) = mpsc::channel::<u32>(1);
+            let session_id = Uuid::new_v4();
+            let forwarder =
+                tokio::spawn(forward_output_and_exit(hub, session_id, chunk_rx, exit_rx));
+
+            chunk_tx.send(b"first".to_vec()).await.unwrap();
+            chunk_tx.send(b"second".to_vec()).await.unwrap();
+            drop(chunk_tx);
+            exit_tx.send(7).await.unwrap();
+            drop(exit_tx);
+            forwarder.await.unwrap();
+
+            let frames: Vec<ServerFrame> = [
+                receiver.recv().await,
+                receiver.recv().await,
+                receiver.recv().await,
+            ]
+            .into_iter()
+            .map(|frame| frame.expect("expected three frames"))
+            .collect();
+            for frame in &frames[..2] {
+                match frame {
+                    ServerFrame::Binary(bytes) => {
+                        assert_eq!(&bytes[..1], &[2]);
+                        assert_eq!(&bytes[1..17], session_id.as_bytes());
+                    }
+                    _ => panic!("expected binary frame"),
+                }
+            }
+            assert_eq!(binary_payload(&frames[0]), b"first");
+            assert_eq!(binary_payload(&frames[1]), b"second");
+            match &frames[2] {
+                ServerFrame::Text(text) => {
+                    assert!(text.contains("\"type\":\"exit\""));
+                    assert!(text.contains("\"exitCode\":7"));
+                }
+                _ => panic!("expected exit frame"),
+            }
+        });
+    }
+
+    #[test]
+    fn exit_sent_when_session_ends_without_output() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let hub = Arc::new(Hub::new());
+            let (sender, mut receiver) = mpsc::channel::<ServerFrame>(64);
+            hub.attach(sender);
+            let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(8);
+            let (exit_tx, exit_rx) = mpsc::channel::<u32>(1);
+            let session_id = Uuid::new_v4();
+            let forwarder =
+                tokio::spawn(forward_output_and_exit(hub, session_id, chunk_rx, exit_rx));
+
+            // 无输出即 reader 结束：关闭 chunk 通道后输出任务应立即读取退出码并发送 Exit。
+            drop(chunk_tx);
+            exit_tx.send(3).await.unwrap();
+            drop(exit_tx);
+            forwarder.await.unwrap();
+            match receiver.recv().await {
+                Some(ServerFrame::Text(text)) => {
+                    assert!(text.contains("\"type\":\"exit\""));
+                    assert!(text.contains("\"exitCode\":3"));
+                }
+                _ => panic!("expected exit frame"),
+            }
         });
     }
 }
