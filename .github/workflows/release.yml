@@ -62,6 +62,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: 安装 Node
         uses: actions/setup-node@v4
@@ -91,3 +94,19 @@ jobs:
           releaseName: "ShellGrid ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+
+      # tauri-action 创建的 draft Release 正文为空，这里用 runner 自带的 gh
+      # 从上一标签到本次标签的提交记录生成 release note 并写入。
+      - name: 补充 Release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREVIOUS=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREVIOUS" ]; then
+            RANGE="${PREVIOUS}..${GITHUB_REF_NAME}"
+          else
+            RANGE="HEAD"
+          fi
+          git log "$RANGE" --no-merges --pretty=format:"- %s" | grep -Ev '^- (chore|ci|build):' > release-notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
