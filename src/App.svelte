@@ -11,7 +11,7 @@
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -201,7 +201,7 @@
       layout: splitPane(workspace.layout, paneId, newId, direction),
       panes: { ...workspace.panes, [newId]: { ...workspace.panes[paneId], title: undefined } },
     };
-    activePaneId = newId;
+    controller.setActivePane(newId);
     focusTerminal(newId);
     markDirty();
   }
@@ -221,17 +221,18 @@
     workspace = { ...workspace, layout: nextLayout, panes: remainingPanes };
     const { [paneId]: _closedSession, ...remainingSessions } = sessions;
     sessions = remainingSessions;
-    activePaneId = paneIds(nextLayout)[0];
-    focusTerminal(activePaneId);
+    const nextActiveId = paneIds(nextLayout)[0];
+    controller.setActivePane(nextActiveId);
+    focusTerminal(nextActiveId);
     if (searchPaneId === paneId) closeSearch();
     markDirty();
   }
 
-  // 会话退出或启动失败后，在同一窗格内用原启动信息重启会话并清空终端显示。
+  // 会话退出或启动失败后，在同一窗格内用原启动信息重启会话并重置终端状态。
   function restartPane(paneId: string): void {
     const size = terminalSize(paneId);
     sessions = { ...sessions, [paneId]: { paneId, running: false } };
-    clearTerminal(paneId);
+    resetTerminal(paneId);
     void terminalClient?.create(
       paneId,
       controller.getLaunch(paneId),

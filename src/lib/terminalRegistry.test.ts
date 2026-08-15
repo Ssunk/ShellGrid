@@ -12,6 +12,8 @@ class TerminalMock {
   onResize = vi.fn();
   focus = vi.fn();
   dispose = vi.fn();
+  reset = vi.fn();
+  clear = vi.fn();
   write = vi.fn();
   paste = vi.fn();
 }
@@ -50,6 +52,15 @@ function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unkn
 }
 
 describe("terminal registry", () => {
+  it("resets terminal instance state and buffer on reset", async () => {
+    const { disposeTerminal, getTerminal, resetTerminal, clearTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("reset-pane", makeCallbacks() as never);
+    resetTerminal("reset-pane");
+    expect(entry.terminal.reset).toHaveBeenCalledTimes(1);
+    clearTerminal("reset-pane");
+    expect(entry.terminal.reset).toHaveBeenCalledTimes(2);
+    disposeTerminal("reset-pane");
+  });
   it("focuses the terminal of a mounted pane without throwing for missing panes", async () => {
     const { disposeTerminal, focusTerminal, getTerminal } = await import("./terminalRegistry");
     const entry = getTerminal("focus-pane", makeCallbacks() as never);

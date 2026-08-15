@@ -193,9 +193,14 @@ export function terminalCount(): number {
   return terminals.size;
 }
 
-/** 清空指定窗格终端的显示内容，用于会话重启。 */
+/** 重置指定窗格终端的显示内容与 VT 状态，用于会话重启。 */
+export function resetTerminal(paneId: string): void {
+  terminals.get(paneId)?.terminal.reset();
+}
+
+/** 清空指定窗格终端的显示内容，保留向后兼容。 */
 export function clearTerminal(paneId: string): void {
-  terminals.get(paneId)?.terminal.clear();
+  resetTerminal(paneId);
 }
 
 /** 在当前窗格的滚动缓冲中搜索；空查询清除高亮装饰。 */
