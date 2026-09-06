@@ -3,14 +3,13 @@ node_modules/
 
 # --- Build output ---
 dist/
+dist-electron/
+release/
+artifacts/
 .vite/
 
 # --- Rust / Cargo ---
-src-tauri/target/
-src-tauri/gen/schemas/
-
-# --- Tauri ---
-src-tauri/gen/schemas/
+native/launcher/target/
 
 # --- Logs ---
 *.log

@@ -1,9 +1,9 @@
 import type { ProxyConfig } from "./types";
 
-// 与 Rust 端 workspace::ProxyConfig::validate 保持一致的协议白名单。
+// 前端、工作区服务和 PTY Host 共用的协议白名单。
 const PROXY_SCHEMES = new Set(["http:", "https:", "socks5:", "socks5h:"]);
 
-/** 会话创建时随 create 消息发送给 Rust 端的代理载荷。 */
+/** 会话创建时随 create 消息发送给 PTY Host 的代理载荷。 */
 export interface SessionProxy {
   url: string;
   noProxy?: string;

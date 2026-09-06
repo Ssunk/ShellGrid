@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { desktop } from "./desktop";
+import type { ConnectionInfo } from "../../shared/protocol";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -18,6 +19,7 @@ interface RegistryCallbacks {
   onCwd(paneId: string, cwd: string): void;
   onTitle(paneId: string, title: string): void;
   onInput(paneId: string, data: string): void;
+  onBinaryInput(paneId: string, data: string): void;
   onPasteImages(paneId: string, images: File[]): void;
   onFocus(paneId: string): void;
   onResize(paneId: string, cols: number, rows: number): void;
@@ -29,6 +31,12 @@ const renderers = new Map<string, { webgl: boolean }>();
 const searches = new Map<string, SearchAddon>();
 let webglContexts = 0;
 const MAX_WEBGL_CONTEXTS = 4;
+let windowsPty: ConnectionInfo["windowsPty"] | undefined;
+
+export function configureTerminals(value: ConnectionInfo["windowsPty"]): void {
+  windowsPty = value;
+  for (const entry of terminals.values()) entry.terminal.options.windowsPty = value;
+}
 
 const SEARCH_DECORATIONS = {
   matchBackground: "#3b5e4a",
@@ -43,6 +51,14 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
 
   const terminal = new Terminal({
     allowProposedApi: true,
+    logLevel: "off",
+    windowsPty,
+    linkHandler: {
+      activate(event, uri) {
+        event.preventDefault();
+        void desktop().openExternal(uri).catch(() => {});
+      },
+    },
     cursorBlink: true,
     cursorStyle: "bar",
     fontFamily: '"Cascadia Mono", "Microsoft YaHei UI", Consolas, monospace',
@@ -81,7 +97,7 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   terminal.loadAddon(
     new WebLinksAddon((event, uri) => {
       event.preventDefault();
-      void invoke("open_external", { url: uri });
+      void desktop().openExternal(uri).catch(() => {});
     }),
   );
 
@@ -104,11 +120,12 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
       webglContexts += 1;
       renderer.webgl = true;
     } catch {
-      // xterm's built-in DOM renderer remains active.
+      // xterm's built-in renderer remains active.
     }
   }
 
   terminal.onData((data) => callbacks.onInput(paneId, data));
+  terminal.onBinary((data) => callbacks.onBinaryInput(paneId, data));
   terminal.onTitleChange((title) => callbacks.onTitle(paneId, title));
   terminal.onResize(({ cols, rows }) => callbacks.onResize(paneId, cols, rows));
   const search = new SearchAddon();
@@ -161,8 +178,18 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   return registered;
 }
 
-export function writeTerminal(paneId: string, bytes: Uint8Array): void {
-  terminals.get(paneId)?.terminal.write(bytes);
+export function writeTerminal(paneId: string, data: string, consumed: () => void): boolean {
+  const entry = terminals.get(paneId);
+  if (!entry) return false;
+  entry.terminal.write(data, consumed);
+  return true;
+}
+
+/** Drain writes already submitted before resetting after a host restart. */
+export function drainTerminal(paneId: string): Promise<void> {
+  const entry = terminals.get(paneId);
+  if (!entry) return Promise.resolve();
+  return new Promise((resolve) => entry.terminal.write("", resolve));
 }
 
 export function pasteTerminal(paneId: string, text: string): void {

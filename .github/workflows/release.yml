@@ -1,112 +1,92 @@
 name: Release
-
-# 打 tag（v 开头）时触发：先跑完整检查，通过后构建 Windows 安装包并上传到 GitHub Release 草稿。
 on:
   push:
-    tags:
-      - "v*"
-
-# tauri-action 需要写权限来创建 Release 并上传安装包。
+    tags: ["v*"]
 permissions:
   contents: write
-
+defaults:
+  run:
+    shell: pwsh
 jobs:
   verify:
-    name: 检查（类型 / 测试 / Clippy）
+    name: Windows 类型、服务和真实 ConPTY 验证
     runs-on: windows-latest
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
-
-      - name: 安装 Rust 工具链
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - name: 缓存 Rust 构建产物
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
-
-      - name: 安装前端依赖
-        run: npm ci
-
-      - name: 类型检查
-        run: npm run check
-
-      - name: 前端测试
-        run: npm test
-
-      - name: 前端构建
-        run: npm run build
-
-      - name: Rust 格式检查
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-
-      - name: Rust 测试
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-
+          workspaces: "native/launcher -> target"
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: cargo fmt --manifest-path native\launcher\Cargo.toml -- --check
+      - run: cargo test --locked --manifest-path native\launcher\Cargo.toml
+      - run: cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings
+      - run: npm run build
+      - run: npm run test:windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-verification
+          path: artifacts/windows-verification.json
+          if-no-files-found: ignore
   build:
-    name: 构建并发布安装包
+    name: Electron Windows x64 安装包
     needs: verify
     runs-on: windows-latest
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
-
-      - name: 安装 Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
-
-      - name: 安装 Rust 工具链
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: 缓存 Rust 构建产物
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
-
-      - name: 安装前端依赖
-        run: npm ci
-
-      # tauri-action 会执行 beforeBuildCommand（npm run build）+ tauri build，
-      # 生成 NSIS/MSI 后上传到与当前 tag 对应的 Release 草稿。
-      - name: 构建并上传到 Release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          workspaces: "native/launcher -> target"
+      - name: 校验标签版本
+        run: |
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw '版本标签与 package.json 不一致' }
+      - run: npm ci
+      - run: npm run dist:win
+      - name: 验证打包后的原生模块和磁盘路径
+        run: node scripts\test-windows.mjs --packaged
+      - name: 验证安装、后续版本升级、卸载和数据保留
+        run: npm run test:installers
+      - name: 记录 Release 运行时的多窗格测量
+        run: npm run bench:windows
+      - uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "ShellGrid ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-
-      # tauri-action 创建的 draft Release 正文为空，这里用 runner 自带的 gh
-      # 从上一标签到本次标签的提交记录生成 release note 并写入。
-      - name: 补充 Release notes
-        shell: bash
+          name: windows-installers-and-verification
+          path: |
+            release/*.exe
+            release/*.msi
+            artifacts/windows-verification.json
+            artifacts/windows-benchmark.json
+            artifacts/installer-verification.json
+      - name: 创建 Release 草稿
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PREVIOUS=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          if [ -n "$PREVIOUS" ]; then
-            RANGE="${PREVIOUS}..${GITHUB_REF_NAME}"
-          else
-            RANGE="HEAD"
-          fi
-          git log "$RANGE" --no-merges --pretty=format:"- %s" | grep -Ev '^- (chore|ci|build):' > release-notes.md
-          gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+          $tag = $env:GITHUB_REF_NAME
+          $previous = git describe --tags --abbrev=0 "$tag^" 2>$null
+          $range = if ($LASTEXITCODE -eq 0) { "$previous..$tag" } else { 'HEAD' }
+          $notes = @(git log $range --no-merges '--pretty=format:- %s' | Where-Object { $_ -notmatch '^- (chore|ci|build):' })
+          $notes += ''
+          $notes += '首次从 Tauri 版迁移：先卸载旧程序再安装，保留 %LOCALAPPDATA%\ShellGrid 中的数据。详见仓库迁移说明。'
+          [IO.File]::WriteAllText((Join-Path (Get-Location) 'release-notes.md'), ($notes -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+          gh release create $tag --draft --title "ShellGrid $tag" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw '创建 Release 草稿失败' }
+          $installers = @(Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -in '.exe', '.msi' } | ForEach-Object FullName)
+          gh release upload $tag @installers
+          if ($LASTEXITCODE -ne 0) { throw '上传安装包失败' }

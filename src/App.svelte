@@ -1,8 +1,5 @@
 <script lang="ts">
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { getVersion } from "@tauri-apps/api/app";
-  import { invoke } from "@tauri-apps/api/core";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { desktop } from "./lib/desktop";
   import { onMount, setContext } from "svelte";
   import { ChevronDown, ChevronUp, Columns2, Download, FolderOpen, GitBranch, Globe, Info, Rows2, Save, Search, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
   import GitPanel from "./components/GitPanel.svelte";
@@ -11,9 +8,9 @@
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { clearTerminal, disposeTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { clearTerminal, disposeTerminal, drainTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
-  import type { Bootstrap, EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
+  import type { EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
   const defaultPaneId = "local-pane";
   const fallbackWorkspace: WorkspaceStateV1 = {
@@ -25,7 +22,7 @@
   let workspace = fallbackWorkspace;
   let environment: EnvironmentStatus = {
     windowsSupported: true,
-    webview2Available: true,
+    electronVersion: "", chromeVersion: "", nodeVersion: "", windowsBuild: 0,
     pwshAvailable: true,
     pwshPath: "pwsh.exe",
     gitAvailable: true,
@@ -92,6 +89,7 @@
           if (current && !current.title && title) workspace = { ...workspace, panes: { ...workspace.panes, [id]: { ...current, title } } };
         },
         onInput: (id, data) => terminalClient?.input(id, data),
+        onBinaryInput: (id, data) => terminalClient?.input(id, data, true),
         onPasteImages: (id, images) => void pasteImages(id, images),
         onFocus: (id) => controller.setActivePane(id),
         onResize: (id, cols, rows) => terminalClient?.resize(id, cols, rows),
@@ -103,7 +101,11 @@
       });
       entry.attach(host);
       if (paneId === activePaneId) entry.setFocused(true);
-      void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows, sessionProxy(workspace.proxy));
+      requestAnimationFrame(() => {
+        if (!workspace.panes[paneId] || !entry.container.isConnected) return;
+        fitTerminal(paneId);
+        void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows, sessionProxy(workspace.proxy));
+      });
     },
     resizeTerminal: (paneId) => {
       fitTerminal(paneId);
@@ -116,16 +118,24 @@
     return () => {
       unlistenClose?.();
       window.clearTimeout(reconnectTimer);
+      window.clearTimeout(saveTimer);
+      terminalClient?.dispose();
+      for (const id of paneIds(workspace.layout)) disposeTerminal(id);
     };
   });
 
   async function initialize(): Promise<void> {
     try {
-      const boot = await invoke<Bootstrap>("get_bootstrap");
+      const boot = await desktop().getBootstrap();
       workspace = { ...boot.workspace, rootPath: workspaceRoot(boot.workspace) };
       environment = boot.environment;
       activePaneId = paneIds(workspace.layout)[0];
-      terminalClient = new TerminalClient(boot.wsUrl, boot.token, {
+      appVersion = boot.appVersion;
+      unlistenClose = desktop().onWorkspaceRequest(() => {
+        window.clearTimeout(saveTimer);
+        return workspace;
+      });
+      terminalClient = new TerminalClient(desktop().terminal, {
         onCreated: (paneId, sessionId) => {
           sessions = { ...sessions, [paneId]: { paneId, sessionId, running: true } };
           if (paneId === activePaneId) terminalClient?.focus(paneId);
@@ -145,28 +155,14 @@
           scheduleReconnect();
         },
       });
-      // 连接失败时保留 terminalClient：onDisconnected 驱动的重连逻辑会持续重试。
-      // 只有拿不到 bootstrap（如浏览器预览）才视为没有终端服务，置空客户端。
-      await terminalClient.connect().catch(() => {});
-    } catch {
-      // Browser preview and a missing WebView command both retain a usable shell workspace.
-      terminalClient = undefined;
+      terminalClient.focus(activePaneId);
+      await terminalClient.connect();
+      ready = true;
+      void runUpdateCheck(true);
+    } catch (reason) {
+      errorMessage = reason instanceof Error ? reason.message : "无法初始化桌面终端";
+      if (!terminalClient) ready = true;
     }
-    ready = true;
-    if (!("__TAURI_INTERNALS__" in window)) return;
-    const appWindow = getCurrentWindow();
-    unlistenClose = await appWindow.onCloseRequested(async (event) => {
-      event.preventDefault();
-      if (Object.values(sessions).some((session) => session.running) && !window.confirm("仍有终端正在运行，确定退出并终止它们吗？")) return;
-      const saved = await persist();
-      if (!saved && !window.confirm("工作区保存失败，仍要退出吗？")) return;
-      const stopListening = unlistenClose;
-      unlistenClose = undefined;
-      stopListening?.();
-      await appWindow.close();
-    });
-    appVersion = await getVersion().catch(() => "");
-    void runUpdateCheck(true);
   }
 
   function scheduleReconnect(): void {
@@ -183,7 +179,11 @@
       return;
     }
     errorMessage = "";
+    if (!ready) { ready = true; void runUpdateCheck(true); return; }
     for (const paneId of paneIds(workspace.layout)) {
+      await drainTerminal(paneId);
+      resetTerminal(paneId);
+      fitTerminal(paneId);
       const size = terminalSize(paneId);
       void terminalClient.create(paneId, controller.getLaunch(paneId), size?.cols ?? 80, size?.rows ?? 24, sessionProxy(workspace.proxy));
     }
@@ -206,15 +206,17 @@
     markDirty();
   }
 
-  function close(paneId: string): void {
+  async function close(paneId: string): Promise<void> {
     // 先确认布局允许关闭（最后一个窗格不可关），再销毁会话与终端实例。
-    const nextLayout = closePane(workspace.layout, paneId);
-    if (!nextLayout) {
+    if (!closePane(workspace.layout, paneId)) {
       errorMessage = "至少需要保留一个窗格";
       return;
     }
     const session = sessions[paneId];
-    if (session?.running && !window.confirm("关闭此窗格会终止其中的进程，确定继续吗？")) return;
+    if (session?.running && !(await desktop().confirm("关闭此窗格会终止其中的进程，确定继续吗？"))) return;
+    if (!workspace.panes[paneId]) return;
+    const nextLayout = closePane(workspace.layout, paneId);
+    if (!nextLayout) return;
     terminalClient?.closePane(paneId);
     disposeTerminal(paneId);
     const { [paneId]: _, ...remainingPanes } = workspace.panes;
@@ -254,7 +256,7 @@
       for (const image of images) {
         if (image.size > MAX_CLIPBOARD_IMAGE_BYTES) throw new Error("剪贴板图片超过 20 MiB 限制");
         const bytes = new Uint8Array(await image.arrayBuffer());
-        paths.push(await invoke<string>("save_clipboard_image", { data: bytesToBase64(bytes) }));
+        paths.push(await desktop().saveClipboardImage(bytes));
       }
       if (paths.length === 0) return;
       const references = paths.map((path) => `[图片文件: "${path}"]`).join(" ");
@@ -266,20 +268,12 @@
     }
   }
 
-  // 分块拼接避免 String.fromCharCode 在超大数组上爆栈；base64 比 JSON 数字数组的 IPC 载荷小一个数量级。
-  function bytesToBase64(bytes: Uint8Array): string {
-    let binary = "";
-    const CHUNK = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK));
-    }
-    return btoa(binary);
-  }
-
   async function persist(): Promise<boolean> {
     saveState = "saving";
     try {
-      await invoke("save_workspace", { workspace });
+      const savedWorkspace = workspace;
+      await desktop().saveWorkspace(savedWorkspace);
+      if (workspace !== savedWorkspace) return true;
       saveState = "saved";
       return true;
     } catch {
@@ -305,16 +299,11 @@
 
   async function chooseWorkspaceFolder(): Promise<void> {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        defaultPath: currentRoot,
-        title: "打开工作区文件夹",
-      });
+      const selected = await desktop().chooseDirectory(currentRoot);
       if (typeof selected !== "string" || selected === currentRoot) return;
       if (
         Object.values(sessions).some((session) => session.running) &&
-        !window.confirm("打开新文件夹会终止当前所有终端并重置为单窗格，确定继续吗？")
+        !(await desktop().confirm("打开新文件夹会终止当前所有终端并重置为单窗格，确定继续吗？"))
       ) return;
 
       for (const paneId of paneIds(workspace.layout)) {
@@ -355,7 +344,7 @@
   }
 
   // 只把合法（或已停用）的草稿写入工作区：启用状态下的非法地址若被持久化，
-  // Rust 端 validate 会拒绝保存，连布局改动也会一起写不进磁盘。
+  // 主进程校验会拒绝保存，连布局改动也会一起写不进磁盘。
   function applyProxyDraft(): void {
     proxyDraft = { ...proxyDraft, url: normalizeProxyUrl(proxyDraft.url) };
     if (proxyDraft.enabled && !isValidProxyUrl(proxyDraft.url)) return;
@@ -385,7 +374,7 @@
   }
 
   function openReleasePage(): void {
-    if (updateInfo) void invoke("open_external", { url: updateInfo.url });
+    if (updateInfo) void desktop().openExternal(updateInfo.url).catch(() => {});
   }
 
   function toggleSearch(): void {
@@ -507,7 +496,7 @@
     <aside class="environment-popover">
       <div class="popover-title">运行环境</div>
       <div class="environment-row"><span>Windows</span><b class:ok={environment.windowsSupported}>{environment.windowsSupported ? "可用" : "不支持"}</b></div>
-      <div class="environment-row"><span>WebView2</span><b class:ok={environment.webview2Available}>{environment.webview2Available ? "可用" : "缺失"}</b></div>
+      <div class="environment-row"><span>Electron</span><b class:ok={Boolean(environment.electronVersion)}>{environment.electronVersion || "未连接"}</b></div>
       <div class="environment-row"><span>PowerShell 7</span><b class:ok={environment.pwshAvailable}>{environment.pwshAvailable ? "可用" : "缺失"}</b></div>
       {#if environment.pwshPath}<code>{environment.pwshPath}</code>{/if}
       <div class="environment-row"><span>Git</span><b class:ok={environment.gitAvailable}>{environment.gitAvailable ? "可用" : "缺失"}</b></div>

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 export default defineConfig({
+  base: "./",
   plugins: [svelte()],
   clearScreen: false,
   server: {
@@ -15,7 +16,6 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes("node_modules/@xterm")) return "xterm";
           if (id.includes("node_modules/lucide-svelte")) return "icons";
-          if (id.includes("node_modules/@tauri-apps")) return "tauri";
           return undefined;
         },
       },

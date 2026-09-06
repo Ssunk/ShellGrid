@@ -1,38 +1,56 @@
 # ShellGrid
 
-Windows x64 多终端桌面应用，每个窗格对应一个独立 PowerShell 7 进程。
+Windows x64 多终端桌面应用，每个窗格对应一个真实 ConPTY 会话和独立 PowerShell 7 进程。
 
 ![ShellGrid 主界面](main.png)
 
 ## 特性
 
-- 多窗格布局（最多 16 个），支持递归分割与比例调节
-- 每个窗格独立 ConPTY 会话与 PowerShell 7 进程
-- 基于 WebSocket 的安全通信，随机端口 + 启动令牌
-- 窗口关闭确认与工作区自动保存
-- 前端合并批处理（活动窗格 ~8ms / 后台 ~33ms）
-- WebGL 渲染加速（最多 4 上下文）
-- 可将剪贴板截图保存为本地图片并把路径粘贴给 Codex、Claude Code 或 Gemini CLI
+- 最多 16 个窗格，递归分割、比例调整，移动布局保留终端实例
+- PowerShell 默认加载用户 Profile；前台/后台 Shell 使用独立的进程优先级
+- xterm.js、10,000 行历史、搜索、最多 4 个 WebGL 上下文及自动回退
+- 独立 PTY Host、MessagePort 传输、消费确认和有界输出反压
+- Job Object 回收 Shell 及子进程，支持关闭确认和工作区自动保存
+- 文件夹工作区、代理设置、Git 暂存/差异/提交/分支/拉取/推送
+- 将剪贴板图片保存为本地文件并把路径粘贴给 Agent CLI
 
-## 技术栈
+## 安装
 
-Tauri 2 / Rust / Svelte 5 / TypeScript / xterm.js
+需要 Windows 10 1903 或更高版本（x64）和 PowerShell 7。安装包已包含 Electron，不需要另装 WebView2、Node 或 Rust。
 
-## 系统要求
+提供 NSIS EXE 和 MSI，选择其中一种安装。首次从 Tauri 版迁移需先卸载旧程序再安装 Electron 版，业务数据继续保留在 `%LOCALAPPDATA%\ShellGrid`。详见[迁移说明](docs/electron-migration.md)。
 
-- Windows 10 1903+
-- PowerShell 7（`pwsh.exe`）
-- WebView2 Runtime
-- Node.js / npm
-- Rust 1.77.2+（MSVC 工具链）
+## 开发
 
-## 快速开始
+技术栈：Electron 42.8.1 / node-pty 1.2.0-beta.15 / xterm 6.1.0-beta.292 / Svelte 5 / TypeScript。Rust 仅用于 Windows 进程启动器。
+
+准备 Node 24、npm、Rust 1.82+（MSVC 工具链）和 PowerShell 7：
 
 ```powershell
-npm install
-npm run tauri dev
+npm ci
+npm run dev
 ```
 
-## 开发命令
+该命令启动完整桌面应用，前端支持 Vite HMR；修改主进程、preload 或 PTY Host 后重启命令。`npm run dev:web` 只预览界面。
 
-参见 [AGENTS.md](AGENTS.md)。
+## 验证与构建
+
+```powershell
+npm run check
+npm test
+npm run build
+cargo fmt --manifest-path native\launcher\Cargo.toml -- --check
+cargo test --locked --manifest-path native\launcher\Cargo.toml
+cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings
+npm run test:windows
+npm run bench:windows
+npm run dist:win
+node scripts\test-windows.mjs --packaged
+npm run test:installers
+```
+
+EXE/MSI 在 `release` 目录，免安装测试目录在 `release\win-unpacked`。Windows 测试和基准使用隔离数据目录，结果写入 artifacts；指标定义和验收边界见[验证记录](docs/electron-verification.md)。版本标签触发 CI 检查、安装包构建和 Release 草稿。
+
+安装器测试会在临时目录实际安装、升级和卸载；为保护已有安装，仅在本机没有 ShellGrid 产品和快捷方式时运行。
+
+更多模块职责和修改约定见 [AGENTS.md](AGENTS.md)。

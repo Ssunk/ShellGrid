@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { desktop } from "../lib/desktop";
+  import type { GitMutation } from "../../shared/desktop";
   import { onMount } from "svelte";
   import {
     ArrowDownToLine,
@@ -17,7 +18,7 @@
     X,
   } from "lucide-svelte";
   import { diffLineKind, fileName, gitStatusLabel, operationPaths, parentPath, restorePaths, stagedFiles, updateGitPanelError, visibleGitPanelError, workingFiles } from "../lib/git";
-  import type { GitDiff, GitFileStatus, GitOperationResult, GitStatus } from "../lib/types";
+  import type { GitDiff, GitFileStatus, GitStatus } from "../lib/types";
 
   export let path: string;
   export let gitAvailable: boolean;
@@ -78,7 +79,7 @@
     const requestedPath = path;
     refreshing = true;
     try {
-      const next = await invoke<GitStatus>("git_status", { path: requestedPath });
+      const next = await desktop().git.status(requestedPath);
       if (path === requestedPath) {
         status = next;
         errors = updateGitPanelError(errors, "refresh", "");
@@ -96,7 +97,7 @@
     diff = null;
     diffLoading = true;
     try {
-      diff = await invoke<GitDiff>("git_diff", { path, filePath: file.path, staged: stagedVersion });
+      diff = await desktop().git.diff({ path, filePath: file.path, staged: stagedVersion });
     } catch (reason) {
       errors = updateGitPanelError(errors, "action", messageOf(reason));
     } finally {
@@ -104,13 +105,14 @@
     }
   }
 
-  async function mutate(command: string, args: Record<string, unknown>, label: string): Promise<boolean> {
+  type WithoutPath<T> = T extends unknown ? Omit<T, "path"> : never;
+  async function mutate(request: WithoutPath<GitMutation>, label: string): Promise<boolean> {
     if (operation) return false;
     operation = label;
     errors = updateGitPanelError(errors, "action", "");
     notice = "";
     try {
-      const result = await invoke<GitOperationResult>(command, { path, ...args });
+      const result = await desktop().git.mutate({ path, ...request });
       notice = result.message;
       selectedFile = null;
       diff = null;
@@ -125,7 +127,7 @@
   }
 
   async function commit(): Promise<void> {
-    if (await mutate("git_commit", { message: commitMessage, amend, signoff }, amend ? "正在修补上次提交..." : "正在提交...")) {
+    if (await mutate({ type: "commit", message: commitMessage, amend, signoff }, amend ? "正在修补上次提交..." : "正在提交...")) {
       commitMessage = "";
       amend = false;
     }
@@ -135,8 +137,8 @@
     const paths = restorePaths(files);
     if (paths.length === 0) return;
     const subject = paths.length === 1 ? `“${paths[0]}”的未暂存更改` : `${paths.length} 个文件的未暂存更改`;
-    if (!window.confirm(`确定放弃${subject}吗？此操作无法撤销。`)) return;
-    await mutate("git_restore", { paths }, "正在恢复工作树文件...");
+    if (!(await desktop().confirm(`确定放弃${subject}吗？此操作无法撤销。`))) return;
+    await mutate({ type: "restore", paths }, "正在恢复工作树文件...");
   }
 
   async function toggleAmend(): Promise<void> {
@@ -146,7 +148,7 @@
     }
     if (commitMessage.trim()) return;
     try {
-      commitMessage = (await invoke<string | null>("git_head_message", { path })) ?? "";
+      commitMessage = (await desktop().git.headMessage(path)) ?? "";
     } catch {
       // 读取不到上次提交信息时保持输入框为空，仍可手动填写
     }
@@ -155,11 +157,11 @@
   async function switchBranch(event: Event): Promise<void> {
     const branch = (event.currentTarget as HTMLSelectElement).value;
     if (!branch || branch === status?.branch) return;
-    await mutate("git_switch_branch", { branch, create: false }, "正在切换分支...");
+    await mutate({ type: "switchBranch", branch, create: false }, "正在切换分支...");
   }
 
   async function createBranch(): Promise<void> {
-    if (await mutate("git_switch_branch", { branch: newBranch, create: true }, "正在创建分支...")) {
+    if (await mutate({ type: "switchBranch", branch: newBranch, create: true }, "正在创建分支...")) {
       newBranch = "";
       showNewBranch = false;
     }
@@ -176,22 +178,22 @@
       showRemotePicker = true;
       return;
     }
-    await mutate("git_push", { remote: null, forceWithLease: false }, "正在推送...");
+    await mutate({ type: "push", remote: null, forceWithLease: false }, "正在推送...");
   }
 
   async function pushWithUpstream(): Promise<void> {
-    if (await mutate("git_push", { remote: selectedRemote, forceWithLease: false }, "正在建立 upstream 并推送...")) {
+    if (await mutate({ type: "push", remote: selectedRemote, forceWithLease: false }, "正在建立 upstream 并推送...")) {
       showRemotePicker = false;
     }
   }
 
   async function forcePush(): Promise<void> {
     if (!status?.branch || !status.upstream) return;
-    const confirmed = window.confirm(
+    const confirmed = await desktop().confirm(
       `确定将“${status.branch}”安全强制推送到“${status.upstream}”吗？\n\n将使用 git push --force-with-lease；如果远端已有未获取的新提交，Git 会拒绝推送。`,
     );
     if (!confirmed) return;
-    await mutate("git_push", { remote: null, forceWithLease: true }, "正在安全强制推送...");
+    await mutate({ type: "push", remote: null, forceWithLease: true }, "正在安全强制推送...");
   }
 
   function handleCommitKey(event: KeyboardEvent): void {
@@ -278,7 +280,7 @@
       {/if}
       {#if status.ahead || status.behind}<span class="git-sync-count">↓{status.behind} ↑{status.ahead}</span>{/if}
       <button class="icon-button" title="新建并切换分支" disabled={Boolean(operation)} on:click={() => (showNewBranch = !showNewBranch)}><Plus size={15} /></button>
-      <button class="icon-button" title={status.upstream ? "拉取（仅快进）" : "当前分支没有 upstream"} disabled={Boolean(operation) || !status.upstream} on:click={() => void mutate("git_pull", {}, "正在拉取...")}><ArrowDownToLine size={15} /></button>
+      <button class="icon-button" title={status.upstream ? "拉取（仅快进）" : "当前分支没有 upstream"} disabled={Boolean(operation) || !status.upstream} on:click={() => void mutate({ type: "pull" }, "正在拉取...")}><ArrowDownToLine size={15} /></button>
       <button class="icon-button" title="推送" disabled={Boolean(operation) || status.detached} on:click={() => void push()}><ArrowUpFromLine size={15} /></button>
       <button class="icon-button git-force-push" title={status.upstream ? "安全强制推送（--force-with-lease）" : "当前分支没有 upstream，无法强制推送"} disabled={Boolean(operation) || status.detached || !status.upstream} on:click={() => void forcePush()}><ShieldAlert size={15} /></button>
     </section>
@@ -313,26 +315,26 @@
 
     <div class="git-scroll">
       <section class="git-change-group">
-        <header><span>已暂存</span><b>{staged.length}</b>{#if staged.length}<button class="icon-button" title="全部取消暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_unstage", { paths: operationPaths(staged) }, "正在取消暂存...")}><Minus size={14} /></button>{/if}</header>
+        <header><span>已暂存</span><b>{staged.length}</b>{#if staged.length}<button class="icon-button" title="全部取消暂存" disabled={Boolean(operation)} on:click={() => void mutate({ type: "unstage", paths: operationPaths(staged) }, "正在取消暂存...")}><Minus size={14} /></button>{/if}</header>
         {#each staged as file (`staged:${file.path}`)}
           <div class:selected={selectedFile?.staged && selectedFile.file.path === file.path} class="git-file-row">
             <button class="git-file-main" title={file.path} on:click={() => void openDiff(file, true)}>
               <FileDiff size={14} /><span><strong>{fileName(file.path)}</strong>{#if parentPath(file.path)}<small>{parentPath(file.path)}</small>{/if}</span><em title={gitStatusLabel(file.indexStatus)}>{file.indexStatus}</em>
             </button>
-            <button class="icon-button" title="取消暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_unstage", { paths: operationPaths([file]) }, "正在取消暂存...")}><Minus size={14} /></button>
+            <button class="icon-button" title="取消暂存" disabled={Boolean(operation)} on:click={() => void mutate({ type: "unstage", paths: operationPaths([file]) }, "正在取消暂存...")}><Minus size={14} /></button>
           </div>
         {:else}<p class="git-group-empty">没有已暂存的更改</p>{/each}
       </section>
 
       <section class="git-change-group">
-        <header><span>更改</span><b>{working.length}</b>{#if restorePaths(working).length}<button class="icon-button" title="放弃全部未暂存更改（不含未跟踪文件）" disabled={Boolean(operation)} on:click={() => void restore(working)}><Undo2 size={14} /></button>{/if}{#if working.length}<button class="icon-button" title="全部暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_stage", { paths: operationPaths(working) }, "正在暂存...")}><Plus size={14} /></button>{/if}</header>
+        <header><span>更改</span><b>{working.length}</b>{#if restorePaths(working).length}<button class="icon-button" title="放弃全部未暂存更改（不含未跟踪文件）" disabled={Boolean(operation)} on:click={() => void restore(working)}><Undo2 size={14} /></button>{/if}{#if working.length}<button class="icon-button" title="全部暂存" disabled={Boolean(operation)} on:click={() => void mutate({ type: "stage", paths: operationPaths(working) }, "正在暂存...")}><Plus size={14} /></button>{/if}</header>
         {#each working as file (`working:${file.path}`)}
           <div class:selected={!selectedFile?.staged && selectedFile?.file.path === file.path} class="git-file-row">
             <button class="git-file-main" title={file.path} on:click={() => void openDiff(file, false)}>
               <FileDiff size={14} /><span><strong>{fileName(file.path)}</strong>{#if parentPath(file.path)}<small>{parentPath(file.path)}</small>{/if}</span><em title={gitStatusLabel(file.worktreeStatus)}>{file.worktreeStatus}</em>
             </button>
             {#if file.indexStatus !== "?"}<button class="icon-button" title="放弃未暂存更改（git restore）" disabled={Boolean(operation)} on:click={() => void restore([file])}><Undo2 size={14} /></button>{/if}
-            <button class="icon-button" title="暂存" disabled={Boolean(operation)} on:click={() => void mutate("git_stage", { paths: operationPaths([file]) }, "正在暂存...")}><Plus size={14} /></button>
+            <button class="icon-button" title="暂存" disabled={Boolean(operation)} on:click={() => void mutate({ type: "stage", paths: operationPaths([file]) }, "正在暂存...")}><Plus size={14} /></button>
           </div>
         {:else}<p class="git-group-empty">工作树没有未暂存更改</p>{/each}
       </section>

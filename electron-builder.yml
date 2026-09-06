@@ -1,0 +1,49 @@
+appId: io.shellgrid.desktop
+productName: ShellGrid
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - dist-electron/**
+  - "!**/*.map"
+  - "!**/*.pdb"
+  - "!node_modules/node-pty/prebuilds/linux-*/**"
+  - "!node_modules/node-pty/prebuilds/darwin-*/**"
+  - "!node_modules/node-pty/prebuilds/win32-arm64/**"
+  - "!node_modules/node-pty/third_party/**"
+  - "!node_modules/node-pty/src/**"
+  - "!node_modules/node-pty/build/**"
+asar: true
+asarUnpack:
+  - node_modules/node-pty/**
+  - dist-electron/pty-host.cjs
+extraResources:
+  - from: native/launcher/target/release/shellgrid-launcher.exe
+    to: bin/shellgrid-launcher.exe
+  - from: build/icon.ico
+    to: icon.ico
+# node-pty 1.2 uses Node-API; its win32-x64 prebuilds load in Electron 42.
+# Keep DLL/worker paths intact and verify them in the real Electron smoke suite.
+npmRebuild: false
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: msi
+      arch: [x64]
+  artifactName: ShellGrid-${version}-${arch}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  shortcutName: ShellGrid
+msi:
+  oneClick: false
+  perMachine: false
+  createDesktopShortcut: true
+  shortcutName: ShellGrid
+publish: null

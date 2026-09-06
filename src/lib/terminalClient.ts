@@ -1,6 +1,8 @@
 import type { PaneLaunchInfo } from "./types";
 import type { SessionProxy } from "./proxy";
-import { writeTerminal } from "./terminalRegistry";
+import type { TerminalBridge } from "../../shared/desktop";
+import { ACK_CHARS, MAX_INPUT_CHARS, validEvent, type ConnectionInfo, type TerminalCommand } from "../../shared/protocol";
+import { configureTerminals, writeTerminal } from "./terminalRegistry";
 
 interface ClientCallbacks {
   onCreated(paneId: string, sessionId: string): void;
@@ -8,249 +10,169 @@ interface ClientCallbacks {
   onError(paneId: string | undefined, message: string): void;
   onDisconnected(): void;
 }
-
-interface ControlMessage {
-  type: string;
-  requestId?: string;
-  paneId?: string;
-  sessionId?: string;
+interface Request { id: string; paneId: string; sent: boolean }
+interface Session {
+  paneId: string;
+  id: string;
+  pendingWrites: number;
+  consumed: number;
   exitCode?: number;
-  message?: string;
 }
-
-interface OutputQueue {
-  chunks: Uint8Array[];
-  timer?: number;
-}
-
 export class TerminalClient {
-  private socket?: WebSocket;
-  private connected?: Promise<void>;
-  private sessions = new Map<string, string>();
-  private panesBySession = new Map<string, string>();
-  private requests = new Map<string, string>();
-  private queues = new Map<string, OutputQueue>();
-  private pendingOutput = new Map<string, Uint8Array[]>();
+  private connection?: Promise<void>;
+  private info?: ConnectionInfo;
+  private epoch = 0;
+  private disposed = false;
+  private sessions = new Map<string, Session>();
+  private panesBySession = new Map<string, Session>();
+  private requests = new Map<string, Request>();
+  private requestByPane = new Map<string, Request>();
   private pendingResize = new Map<string, { cols: number; rows: number }>();
-  private closingPanes = new Set<string>();
   private focusedPane?: string;
+  private readonly unsubscribe: (() => void)[];
 
-  constructor(
-    private readonly url: string,
-    private readonly token: string,
-    private readonly callbacks: ClientCallbacks,
-  ) {}
-
-  connect(): Promise<void> {
-    if (this.connected) return this.connected;
-    this.connected = new Promise((resolve, reject) => {
-      const socket = new WebSocket(`${this.url}?token=${encodeURIComponent(this.token)}`);
-      socket.binaryType = "arraybuffer";
-      socket.onopen = () => resolve();
-      socket.onerror = () => reject(new Error("无法连接本机终端服务"));
-      socket.onmessage = (event) => this.receive(event.data as string | ArrayBuffer);
-      socket.onclose = () => this.handleDisconnect(socket);
-      this.socket = socket;
-    });
-    return this.connected;
+  constructor(private readonly bridge: TerminalBridge, private readonly callbacks: ClientCallbacks) {
+    this.unsubscribe = [
+      bridge.onEvent((event) => this.receive(event)),
+      bridge.onDisconnected(() => this.disconnected()),
+    ];
   }
-
-  // 连接断开后清空全部会话状态：后端会在下一个连接建立时回收旧会话，
-  // 这里同步丢弃映射、未完成请求和批处理队列，让每个窗格可以重新创建会话。
-  private handleDisconnect(socket: WebSocket): void {
-    if (this.socket !== socket) return;
-    this.socket = undefined;
-    this.connected = undefined;
-    this.sessions.clear();
-    this.panesBySession.clear();
-    this.requests.clear();
-    this.pendingOutput.clear();
-    this.pendingResize.clear();
-    this.closingPanes.clear();
-    for (const queue of this.queues.values()) {
-      if (queue.timer !== undefined) window.clearTimeout(queue.timer);
-    }
-    this.queues.clear();
+  connect(): Promise<void> {
+    if (this.connection) return this.connection;
+    const epoch = this.epoch;
+    const connecting = this.bridge.connect().then((info) => {
+      if (this.disposed || this.epoch !== epoch) throw new Error("终端连接已过期");
+      this.info = info;
+      configureTerminals(info.windowsPty);
+    }).catch((error: unknown) => {
+      if (this.epoch === epoch) this.disconnected();
+      throw error;
+    });
+    this.connection = connecting;
+    return connecting;
+  }
+  private disconnected(): void {
+    if (this.disposed) return;
+    this.epoch++;
+    this.info = undefined;
+    this.connection = undefined;
+    this.sessions.clear(); this.panesBySession.clear();
+    this.requests.clear(); this.requestByPane.clear(); this.pendingResize.clear();
     this.callbacks.onDisconnected();
   }
-
-  async create(
-    paneId: string,
-    launch: PaneLaunchInfo,
-    cols: number,
-    rows: number,
-    proxy?: SessionProxy,
-  ): Promise<void> {
-    this.closingPanes.delete(paneId);
-    if (this.sessions.has(paneId) || [...this.requests.values()].includes(paneId)) return;
-    // 连接失败不在此处抛出：重连由 onDisconnected → scheduleReconnect 驱动，
-    // 重连成功后 reconnect() 会为所有窗格重新 create，这里静默放弃即可。
+  async create(paneId: string, launch: PaneLaunchInfo, cols: number, rows: number, proxy?: SessionProxy): Promise<void> {
+    if (this.disposed || this.sessions.has(paneId) || this.requestByPane.has(paneId)) return;
+    // Reserve before awaiting connect: concurrent mounts cannot create two shells.
+    const request: Request = { id: crypto.randomUUID(), paneId, sent: false };
+    this.requests.set(request.id, request);
+    this.requestByPane.set(paneId, request);
     await this.connect().catch(() => {});
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
-    const requestId = crypto.randomUUID();
-    this.requests.set(requestId, paneId);
-    // proxy 为 undefined 时 JSON.stringify 会省略该字段，Rust 端反序列化为 None。
-    this.sendJson({ type: "create", requestId, paneId, ...launch, cols, rows, proxy });
+    if (!this.info || this.requests.get(request.id) !== request) return;
+    request.sent = true;
+    const size = this.pendingResize.get(paneId) ?? { cols, rows };
+    this.send({
+      type: "create", generation: this.info.generation, requestId: request.id, paneId,
+      launch, ...size, focused: this.focusedPane === paneId, proxy,
+    });
   }
-
-  input(paneId: string, data: string): void {
-    const sessionId = this.sessions.get(paneId);
-    if (!sessionId || this.socket?.readyState !== WebSocket.OPEN) return;
-    const payload = new TextEncoder().encode(data);
-    const frame = new Uint8Array(17 + payload.length);
-    frame[0] = 1;
-    frame.set(uuidBytes(sessionId), 1);
-    frame.set(payload, 17);
-    this.socket.send(frame);
-  }
-
-  resize(paneId: string, cols: number, rows: number): void {
-    const sessionId = this.sessions.get(paneId);
-    if (sessionId) {
-      this.sendJson({ type: "resize", sessionId, cols, rows });
-    } else {
-      // 会话尚未创建完成：先记住尺寸，待 created 后补发。否则窗格创建早期 fit 得到的
-      // 真实行列会因 sessionId 缺失被丢弃，PTY 停留在 create 时的默认尺寸，里面的
-      // shell/agent 会按错误行列绘制而错位。
-      this.pendingResize.set(paneId, { cols, rows });
+  input(paneId: string, data: string, binary = false): void {
+    const session = this.sessions.get(paneId);
+    if (!session || session.exitCode !== undefined || !this.info) return;
+    for (let offset = 0; offset < data.length;) {
+      let end = Math.min(data.length, offset + MAX_INPUT_CHARS);
+      if (!binary && end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--;
+      this.send({ type: "input", generation: this.info.generation, sessionId: session.id, data: data.slice(offset, end), binary });
+      offset = end;
     }
   }
-
+  resize(paneId: string, cols: number, rows: number): void {
+    const session = this.sessions.get(paneId);
+    if (session && this.info) this.send({ type: "resize", generation: this.info.generation, sessionId: session.id, cols, rows });
+    else this.pendingResize.set(paneId, { cols, rows });
+  }
   focus(paneId: string): void {
     if (this.focusedPane === paneId) return;
     const previous = this.focusedPane && this.sessions.get(this.focusedPane);
-    if (previous) this.sendJson({ type: "set_priority", sessionId: previous, focused: false });
+    if (previous && this.info) this.send({ type: "setPriority", generation: this.info.generation, sessionId: previous.id, focused: false });
     this.focusedPane = paneId;
     const current = this.sessions.get(paneId);
-    if (current) this.sendJson({ type: "set_priority", sessionId: current, focused: true });
+    if (current && this.info) this.send({ type: "setPriority", generation: this.info.generation, sessionId: current.id, focused: true });
   }
-
   closePane(paneId: string): void {
-    if ([...this.requests.values()].includes(paneId)) this.closingPanes.add(paneId);
-    const sessionId = this.sessions.get(paneId);
-    if (sessionId) {
-      this.sendJson({ type: "close", sessionId });
-      this.sessions.delete(paneId);
-      this.panesBySession.delete(sessionId);
-      this.pendingOutput.delete(sessionId);
+    const pending = this.requestByPane.get(paneId);
+    if (pending) {
+      if (pending.sent && this.info) this.send({ type: "close", generation: this.info.generation, requestId: pending.id });
+      this.requests.delete(pending.id); this.requestByPane.delete(paneId);
     }
-    const queue = this.queues.get(paneId);
-    if (queue?.timer !== undefined) window.clearTimeout(queue.timer);
-    this.queues.delete(paneId);
+    const session = this.sessions.get(paneId);
+    if (session) {
+      if (this.info) this.send({ type: "close", generation: this.info.generation, sessionId: session.id });
+      this.sessions.delete(paneId); this.panesBySession.delete(session.id);
+    }
     this.pendingResize.delete(paneId);
   }
-
-  isRunning(paneId: string): boolean {
-    return this.sessions.has(paneId);
-  }
-
-  private sendJson(value: object): void {
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(value));
-  }
-
-  private receive(data: string | ArrayBuffer): void {
-    if (typeof data === "string") {
-      const message = JSON.parse(data) as ControlMessage;
-      if (message.type === "created" && message.requestId && message.sessionId && message.paneId) {
-        this.requests.delete(message.requestId);
-        if (this.closingPanes.delete(message.paneId)) {
-          this.pendingOutput.delete(message.sessionId);
-          this.pendingResize.delete(message.paneId);
-          this.sendJson({ type: "close", sessionId: message.sessionId });
-          return;
-        }
-        this.sessions.set(message.paneId, message.sessionId);
-        this.panesBySession.set(message.sessionId, message.paneId);
-        this.callbacks.onCreated(message.paneId, message.sessionId);
-        // 补发创建期间被缓存的尺寸，纠正 PTY 行列，避免新窗格里的 shell/agent 错位。
-        const size = this.pendingResize.get(message.paneId);
-        if (size) {
-          this.pendingResize.delete(message.paneId);
-          this.sendJson({ type: "resize", sessionId: message.sessionId, cols: size.cols, rows: size.rows });
-        }
-        const pending = this.pendingOutput.get(message.sessionId);
-        if (pending) {
-          this.pendingOutput.delete(message.sessionId);
-          for (const chunk of pending) this.enqueue(message.paneId, chunk);
-        }
-      } else if (message.type === "exit" && message.sessionId) {
-        this.pendingOutput.delete(message.sessionId);
-        const paneId = this.panesBySession.get(message.sessionId);
-        if (paneId) {
-          this.sessions.delete(paneId);
-          this.panesBySession.delete(message.sessionId);
-          this.callbacks.onExit(paneId, message.exitCode ?? 0);
-        }
-      } else if (message.type === "error") {
-        if (message.sessionId) this.pendingOutput.delete(message.sessionId);
-        let paneId = message.sessionId ? this.panesBySession.get(message.sessionId) : undefined;
-        if (message.requestId) {
-          const requestedPane = this.requests.get(message.requestId);
-          this.requests.delete(message.requestId);
-          if (requestedPane && this.closingPanes.delete(requestedPane)) return;
-          paneId ??= requestedPane;
-        }
-        this.callbacks.onError(paneId, message.message ?? "终端服务发生未知错误");
+  isRunning(paneId: string): boolean { return this.sessions.has(paneId); }
+  private send(command: TerminalCommand): void { if (this.info && !this.disposed) this.bridge.send(command); }
+  private receive(value: unknown): void {
+    if (!validEvent(value) || !this.info || value.generation !== this.info.generation) return;
+    const event = value;
+    if (event.type === "created") {
+      const request = this.requests.get(event.requestId);
+      if (!request || request.paneId !== event.paneId || this.requestByPane.get(event.paneId) !== request) {
+        this.send({ type: "close", generation: event.generation, sessionId: event.sessionId });
+        return;
       }
-      return;
-    }
-    const frame = new Uint8Array(data);
-    if (frame.length < 17 || frame[0] !== 2) return;
-    const sessionId = bytesUuid(frame.subarray(1, 17));
-    const paneId = this.panesBySession.get(sessionId);
-    if (paneId) {
-      this.enqueue(paneId, frame.slice(17));
+      this.requests.delete(event.requestId); this.requestByPane.delete(event.paneId);
+      const session: Session = { paneId: event.paneId, id: event.sessionId, pendingWrites: 0, consumed: 0 };
+      this.sessions.set(event.paneId, session); this.panesBySession.set(session.id, session);
+      const size = this.pendingResize.get(event.paneId);
+      this.pendingResize.delete(event.paneId);
+      if (size) this.send({ type: "resize", generation: event.generation, sessionId: session.id, ...size });
+      this.send({ type: "setPriority", generation: event.generation, sessionId: session.id, focused: this.focusedPane === event.paneId });
+      this.callbacks.onCreated(event.paneId, session.id);
+    } else if (event.type === "data") {
+      const session = this.panesBySession.get(event.sessionId);
+      if (!session) return;
+      session.pendingWrites++;
+      const accepted = writeTerminal(session.paneId, event.data, () => {
+        session.pendingWrites--;
+        if (this.panesBySession.get(session.id) !== session || this.info?.generation !== event.generation) return;
+        session.consumed += event.data.length;
+        while (session.consumed >= ACK_CHARS) {
+          this.send({ type: "ack", generation: event.generation, sessionId: session.id, chars: ACK_CHARS });
+          session.consumed -= ACK_CHARS;
+        }
+        this.finishExit(session);
+      });
+      if (!accepted) {
+        this.closePane(session.paneId);
+        this.callbacks.onError(session.paneId, "终端显示实例不存在，会话已关闭");
+      }
+    } else if (event.type === "exit") {
+      const session = this.panesBySession.get(event.sessionId);
+      if (!session) return;
+      session.exitCode = event.exitCode;
+      this.finishExit(session);
     } else {
-      const pending = this.pendingOutput.get(sessionId) ?? [];
-      if (pending.length < 64) pending.push(frame.slice(17));
-      this.pendingOutput.set(sessionId, pending);
+      const request = event.requestId ? this.requests.get(event.requestId) : undefined;
+      if (event.requestId && !request) return;
+      const paneId = request?.paneId ?? (event.sessionId ? this.panesBySession.get(event.sessionId)?.paneId : undefined);
+      if (event.sessionId && !paneId) return;
+      if (request) { this.requests.delete(request.id); this.requestByPane.delete(request.paneId); }
+      if (event.sessionId && paneId) this.closePane(paneId);
+      this.callbacks.onError(paneId, event.message);
     }
   }
-
-  private enqueue(paneId: string, chunk: Uint8Array): void {
-    const queue = this.queues.get(paneId) ?? { chunks: [] };
-    queue.chunks.push(chunk);
-    if (queue.timer === undefined) {
-      const delay = paneId === this.focusedPane ? 8 : 33;
-      queue.timer = window.setTimeout(() => this.flush(paneId), delay);
-    }
-    this.queues.set(paneId, queue);
+  private finishExit(session: Session): void {
+    if (session.exitCode === undefined || session.pendingWrites !== 0) return;
+    if (session.consumed && this.info) this.send({ type: "ack", generation: this.info.generation, sessionId: session.id, chars: session.consumed });
+    this.sessions.delete(session.paneId); this.panesBySession.delete(session.id);
+    this.callbacks.onExit(session.paneId, session.exitCode);
   }
-
-  private flush(paneId: string): void {
-    const queue = this.queues.get(paneId);
-    if (!queue) return;
-    queue.timer = undefined;
-    let size = 0;
-    const selected: Uint8Array[] = [];
-    while (queue.chunks.length > 0 && size + queue.chunks[0].length <= 64 * 1024) {
-      const chunk = queue.chunks.shift()!;
-      selected.push(chunk);
-      size += chunk.length;
-    }
-    if (selected.length === 0 && queue.chunks.length > 0) {
-      selected.push(queue.chunks.shift()!);
-      size = selected[0].length;
-    }
-    const output = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of selected) {
-      output.set(chunk, offset);
-      offset += chunk.length;
-    }
-    writeTerminal(paneId, output);
-    if (queue.chunks.length > 0) {
-      queue.timer = window.setTimeout(() => this.flush(paneId), paneId === this.focusedPane ? 8 : 33);
-    }
+  dispose(): void {
+    this.disposed = true;
+    for (const unsubscribe of this.unsubscribe) unsubscribe();
+    this.bridge.disconnect();
+    this.sessions.clear(); this.panesBySession.clear(); this.requests.clear(); this.requestByPane.clear();
   }
-}
-
-function uuidBytes(uuid: string): Uint8Array {
-  const hex = uuid.replaceAll("-", "");
-  return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16));
-}
-
-function bytesUuid(bytes: Uint8Array): string {
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

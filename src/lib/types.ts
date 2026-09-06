@@ -38,7 +38,10 @@ export interface WorkspaceStateV1 {
 
 export interface EnvironmentStatus {
   windowsSupported: boolean;
-  webview2Available: boolean;
+  electronVersion: string;
+  chromeVersion: string;
+  nodeVersion: string;
+  windowsBuild: number;
   pwshAvailable: boolean;
   pwshPath: string | null;
   gitAvailable: boolean;
@@ -84,8 +87,7 @@ export interface GitOperationResult {
 
 export interface Bootstrap {
   workspace: WorkspaceStateV1;
-  wsUrl: string;
-  token: string;
+  appVersion: string;
   environment: EnvironmentStatus;
 }
 

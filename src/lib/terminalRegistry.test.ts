@@ -1,13 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 class TerminalMock {
   cols = 80;
   rows = 24;
+  options: object;
+  constructor(options: object) { this.options = options; }
   unicode = { activeVersion: "" };
   parser = { registerOscHandler: vi.fn() };
   loadAddon = vi.fn();
   open = vi.fn((element: HTMLElement) => { element.dataset.opened = "true"; });
   onData = vi.fn();
+  onBinary = vi.fn();
   onTitleChange = vi.fn();
   onResize = vi.fn();
   focus = vi.fn();
@@ -46,12 +49,48 @@ vi.mock("@xterm/addon-search", () => ({
 
 function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onPasteImages: vi.fn(),
+    onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onBinaryInput: vi.fn(), onPasteImages: vi.fn(),
     onFocus: vi.fn(), onResize: vi.fn(), onSearchResults: vi.fn(), ...extra,
   };
 }
 
+afterEach(async () => {
+  const { disposeTerminal } = await import("./terminalRegistry");
+  for (const id of ["stable-pane", "image-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane"]) disposeTerminal(id);
+  Reflect.deleteProperty(window, "shellgrid");
+});
+
 describe("terminal registry", () => {
+  it("forwards legacy binary input independently of text input", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const onBinaryInput = vi.fn(), onInput = vi.fn();
+    const entry = getTerminal("binary-pane", makeCallbacks({ onBinaryInput, onInput }) as never);
+    const terminal = entry.terminal as unknown as TerminalMock;
+    terminal.onBinary.mock.calls[0][0]("\x80\xff");
+    expect(onBinaryInput).toHaveBeenCalledWith("binary-pane", "\x80\xff");
+    expect(onInput).not.toHaveBeenCalled();
+  });
+  it("acknowledges writes through the xterm callback, never before parsing", async () => {
+    const { getTerminal, writeTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("ack-pane", makeCallbacks() as never);
+    const done = vi.fn();
+    expect(writeTerminal("ack-pane", "tail", done)).toBe(true);
+    expect(done).not.toHaveBeenCalled();
+    const terminal = entry.terminal as unknown as TerminalMock;
+    terminal.write.mock.calls[0][1]();
+    expect(done).toHaveBeenCalledOnce();
+    expect(writeTerminal("missing", "tail", done)).toBe(false);
+  });
+  it("opens OSC 8 links through the validated desktop API", async () => {
+    const openExternal = vi.fn(async () => {});
+    Object.defineProperty(window, "shellgrid", { configurable: true, value: { openExternal } });
+    const { getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("link-pane", makeCallbacks() as never);
+    const event = new MouseEvent("click", { cancelable: true });
+    entry.terminal.options.linkHandler!.activate(event, "https://example.com", { start: { x: 1, y: 1 }, end: { x: 4, y: 1 } });
+    expect(event.defaultPrevented).toBe(true);
+    expect(openExternal).toHaveBeenCalledWith("https://example.com");
+  });
   it("resets terminal instance state and buffer on reset", async () => {
     const { disposeTerminal, getTerminal, resetTerminal, clearTerminal } = await import("./terminalRegistry");
     const entry = getTerminal("reset-pane", makeCallbacks() as never);
