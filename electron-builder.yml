@@ -19,8 +19,6 @@ asarUnpack:
   - node_modules/node-pty/**
   - dist-electron/pty-host.cjs
 extraResources:
-  - from: native/launcher/target/release/shellgrid-launcher.exe
-    to: bin/shellgrid-launcher.exe
   - from: build/icon.ico
     to: icon.ico
 # node-pty 1.2 uses Node-API; its win32-x64 prebuilds load in Electron 42.

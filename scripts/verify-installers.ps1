@@ -67,7 +67,7 @@ function Run-Installer([string]$Executable, [string[]]$Arguments) {
 function Check-Installation([string]$Target, [string]$ExpectedVersion) {
   $targetPath = [IO.Path]::GetFullPath($Target)
   if (-not $targetPath.StartsWith($testRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Installation escaped the verified test directory' }
-  foreach ($relative in @('ShellGrid.exe', 'resources\bin\shellgrid-launcher.exe', 'resources\app.asar', 'resources\app.asar.unpacked\dist-electron\pty-host.cjs',
+  foreach ($relative in @('ShellGrid.exe', 'resources\app.asar', 'resources\app.asar.unpacked\dist-electron\pty-host.cjs',
     'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\conpty.node',
     'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\conpty\conpty.dll',
     'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\conpty\OpenConsole.exe',
@@ -89,7 +89,7 @@ try {
   Run-Installer $oldExe @('/S', '/currentuser', "/D=$exeTarget")
   $activeUninstaller = Join-Path $exeTarget 'Uninstall ShellGrid.exe'
   Check-Installation $exeTarget $version
-  $results.Add('NSIS fresh per-user install and native runtime paths')
+  $results.Add('NSIS fresh per-user install and Electron/node-pty runtime paths')
   Run-Installer $newExe @('/S', '/currentuser', "/D=$exeTarget")
   Check-Installation $exeTarget $nextVersion
   $results.Add('NSIS subsequent version upgrade preserves workspace and images')
@@ -104,7 +104,7 @@ try {
   Run-Installer 'msiexec.exe' @('/i', $oldMsi, '/qn', '/norestart', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', "APPLICATIONFOLDER=$msiTarget")
   $activeMsi = $oldMsi
   Check-Installation $msiTarget $version
-  $results.Add('MSI fresh per-user install and native runtime paths')
+  $results.Add('MSI fresh per-user install and Electron/node-pty runtime paths')
   Run-Installer 'msiexec.exe' @('/i', $newMsi, '/qn', '/norestart', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', "APPLICATIONFOLDER=$msiTarget")
   $activeMsi = $newMsi
   Check-Installation $msiTarget $nextVersion

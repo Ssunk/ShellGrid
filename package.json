@@ -1,7 +1,7 @@
 {
   "name": "shellgrid",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Windows 多终端工作区",
   "author": "ShellGrid contributors",
@@ -13,7 +13,6 @@
     "build": "node scripts/build.mjs",
     "build:web": "vite build",
     "build:electron": "node scripts/build-electron.mjs",
-    "build:native": "cargo build --release --locked --manifest-path native/launcher/Cargo.toml",
     "check": "npm run check:web && npm run check:electron",
     "check:web": "svelte-check --tsconfig ./tsconfig.json",
     "check:electron": "tsc --noEmit -p tsconfig.electron.json",

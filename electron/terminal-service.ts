@@ -9,7 +9,6 @@ export class TerminalService {
   private stopHost?: () => Promise<void>;
   constructor(
     private readonly hostPath: string,
-    private readonly launcherPath: string,
     private readonly windowsBuild: number,
     private readonly disconnected: (generation: number) => void,
   ) {}
@@ -56,7 +55,7 @@ export class TerminalService {
           });
           host.once("spawn", () => {
             if (stopped) return;
-            host.postMessage({ type: "connect", generation, launcherPath: this.launcherPath, mainPid: process.pid }, [port1]);
+            host.postMessage({ type: "connect", generation }, [port1]);
           });
         });
         // Bundled ConPTY 1.25 implements modern reflow even on Windows 10. xterm

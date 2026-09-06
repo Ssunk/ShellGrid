@@ -7,7 +7,7 @@ function command(paneId = "pane"): CreateCommand {
   return { type: "create", generation: 1, requestId: randomUUID(), paneId, launch: { cwd: "C:\\", shell: "pwsh.exe", args: [] }, cols: 100, rows: 40, focused: true };
 }
 function fakePty(): ManagedPty {
-  return { shellPid: 42, start: vi.fn(), write: vi.fn(), resize: vi.fn(), setPriority: vi.fn(),
+  return { shellPid: 42, write: vi.fn(), resize: vi.fn(), setPriority: vi.fn(),
     pause: vi.fn(), resume: vi.fn(), close: vi.fn(async () => {}) };
 }
 function setup(factory?: PtyFactory) {
@@ -73,7 +73,6 @@ describe("PTY host session ownership and flow control", () => {
     finish(pty); await settle();
     await manager.shutdown();
     expect(pty.close).toHaveBeenCalled();
-    expect(pty.start).not.toHaveBeenCalled();
     expect(events).toHaveLength(0);
   });
   it("waits for old pane cleanup before rapid recreation and isolates late output", async () => {

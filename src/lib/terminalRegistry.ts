@@ -225,11 +225,6 @@ export function resetTerminal(paneId: string): void {
   terminals.get(paneId)?.terminal.reset();
 }
 
-/** 清空指定窗格终端的显示内容，保留向后兼容。 */
-export function clearTerminal(paneId: string): void {
-  resetTerminal(paneId);
-}
-
 /** 在当前窗格的滚动缓冲中搜索；空查询清除高亮装饰。 */
 export function searchInTerminal(paneId: string, query: string, direction: "next" | "previous"): void {
   const addon = searches.get(paneId);

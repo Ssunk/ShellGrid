@@ -17,18 +17,9 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "native/launcher -> target"
       - run: npm ci
       - run: npm run check
       - run: npm test
-      - run: cargo fmt --manifest-path native\launcher\Cargo.toml -- --check
-      - run: cargo test --locked --manifest-path native\launcher\Cargo.toml
-      - run: cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings
       - run: npm run build
       - run: npm run test:windows
       - uses: actions/upload-artifact@v4
@@ -49,10 +40,6 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "native/launcher -> target"
       - name: 校验标签版本
         run: |
           $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version

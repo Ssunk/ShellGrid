@@ -9,10 +9,10 @@ function resources(): Record<string, number> {
 }
 process.parentPort!.on("message", (event) => {
   if (event.data.type === "stop") { process.exit(0); return; }
-  const { launcherPath, mainPid, shell, cwd } = event.data as { launcherPath: string; mainPid: number; shell: string; cwd: string };
+  const { shell, cwd } = event.data as { shell: string; cwd: string };
   void (async () => {
     const before = resources();
-    const factory = new NodePtyFactory(launcherPath, mainPid);
+    const factory = new NodePtyFactory();
     for (let index = 0; index < 4; index++) {
       let exited!: () => void;
       const exit = new Promise<void>((resolve) => { exited = resolve; });
@@ -20,7 +20,6 @@ process.parentPort!.on("message", (event) => {
         type: "create", generation: 1, requestId: randomUUID(), paneId: "resource-" + index,
         launch: { shell, cwd, args: ["-NoLogo", "-NoProfile", "-Command", "exit 0"] }, cols: 80, rows: 24, focused: true,
       }, { data: () => {}, exit: () => exited() }, new AbortController().signal);
-      pty.start();
       await exit;
     }
     await delay(1800);

@@ -28,6 +28,6 @@
 
 主进程通过 MessageChannelMain 把两端分别交给 preload 和单个 utilityProcess PTY Host。终端数据不经过主进程逐帧中转，不再打开 WebSocket 监听端口。每次连接都有新的 generation，恢复连接前关闭旧宿主并重新创建 Shell。
 
-node-pty 创建 ConPTY 并运行 Rust 启动器。启动器挂起创建 PowerShell，在恢复前把它加入 KILL_ON_JOB_CLOSE Job；独立命名管道返回真实 Shell PID，并监视主进程、宿主和管道连接。启动器不接触终端内容。
+node-pty 直接创建 ConPTY 和 PowerShell，PTY Host 保存 node-pty 返回的真实 Shell PID，并负责会话输入、输出、暂停、恢复、调整尺寸和关闭。终端链路不再包含额外的原生启动器或控制管道。
 
 输出约 5ms 合并；未消费字符超过 100,000 时暂停读取，低于 5,000 时恢复。xterm.write 完成后确认消费，退出状态等待尾部显示处理完成。计数使用 JavaScript 字符串长度，保留 node-pty 事件顺序。

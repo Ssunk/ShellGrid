@@ -65,12 +65,12 @@ async function processResources(shell: string) {
     changed = false;
     for (const process of processes) if (owned.has(process.ParentProcessId) && !owned.has(process.ProcessId)) { owned.add(process.ProcessId); changed = true; }
   }
-  const native = processes.filter((process) => owned.has(process.ProcessId) && !electronPids.has(process.ProcessId));
+  const ptyProcesses = processes.filter((process) => owned.has(process.ProcessId) && !electronPids.has(process.ProcessId));
   return {
     electronWorkingSetMiB: electron.reduce((sum, metric) => sum + metric.memory.workingSetSize / 1024, 0),
     electronCpuPercent: electron.reduce((sum, metric) => sum + metric.cpu.percentCPUUsage, 0),
-    ptyWorkingSetMiB: native.reduce((sum, metric) => sum + Number(metric.WorkingSetSize) / 1024 ** 2, 0),
-    ptyCpuSeconds: native.reduce((sum, metric) => sum + (Number(metric.KernelModeTime) + Number(metric.UserModeTime)) / 1e7, 0),
+    ptyWorkingSetMiB: ptyProcesses.reduce((sum, metric) => sum + Number(metric.WorkingSetSize) / 1024 ** 2, 0),
+    ptyCpuSeconds: ptyProcesses.reduce((sum, metric) => sum + (Number(metric.KernelModeTime) + Number(metric.UserModeTime)) / 1e7, 0),
   };
 }
 async function batch(commands: string[], markers: string[]) {
@@ -143,8 +143,8 @@ async function test() {
   const report = {
     paneCount: panes, windows: release(), cpu: cpus()[0]?.model, logicalCpus: cpus().length, systemMemoryGiB: totalmem() / 1024 ** 3,
     electron: process.versions.electron, node: process.versions.node,
-    build: "Electron release runtime + Vite production assets + Rust --release",
-    method: "Hidden real BrowserWindow; xterm consumes/ACKs output. Latency: renderer send to synthetic response arrival, 10 rounds per pane. 750 ms resource samples; Electron and native PTY descendants (PowerShell, launcher, OpenConsole) working sets are separate. The resource sampler itself is excluded. PowerShell -NoProfile; no Agent CLI.",
+    build: "Electron release runtime + Vite production assets + direct node-pty ConPTY",
+    method: "Hidden real BrowserWindow; xterm consumes/ACKs output. Latency: renderer send to synthetic response arrival, 10 rounds per pane. 750 ms resource samples; Electron and PTY descendants (PowerShell, OpenConsole) working sets are separate. The resource sampler itself is excluded. PowerShell -NoProfile; no Agent CLI.",
     startupMs,
     latencyMs: { samples: sorted.length, p50: sorted[Math.floor(sorted.length * 0.5)], p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] },
     output: { chars: throughput.chars, elapsedMs, charsPerSecond: throughput.chars / elapsedMs * 1000, linesPerPane: 40000 },

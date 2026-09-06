@@ -91,10 +91,7 @@ async function start(): Promise<void> {
   const hostPath = app.isPackaged
     ? join(process.resourcesPath, "app.asar.unpacked", "dist-electron", "pty-host.cjs")
     : join(__dirname, "pty-host.cjs");
-  const launcherPath = app.isPackaged
-    ? join(process.resourcesPath, "bin", "shellgrid-launcher.exe")
-    : join(__dirname, "../native/launcher/target/release/shellgrid-launcher.exe");
-  terminals = new TerminalService(hostPath, launcherPath, status.windowsBuild, (generation) => {
+  terminals = new TerminalService(hostPath, status.windowsBuild, (generation) => {
     if (!currentWindow.isDestroyed()) currentWindow.webContents.send("terminal:disconnected", generation);
   });
   let workspaceReady = false;

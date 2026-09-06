@@ -15,11 +15,11 @@ function shutdown(): Promise<void> {
   })();
 }
 parent.on("message", (event) => {
-  const message = event.data as { type: string; generation?: number; launcherPath?: string; mainPid?: number };
+  const message = event.data as { type: string; generation?: number };
   if (message.type === "shutdown") { void shutdown(); return; }
-  if (message.type !== "connect" || manager || !message.generation || !message.launcherPath || !message.mainPid || !event.ports[0]) return;
+  if (message.type !== "connect" || manager || !message.generation || !event.ports[0]) return;
   port = event.ports[0];
-  manager = new SessionManager(message.generation, new NodePtyFactory(message.launcherPath, message.mainPid),
+  manager = new SessionManager(message.generation, new NodePtyFactory(),
     (data) => port?.postMessage(data), (count) => parent.postMessage({ type: "count", count }));
   port.on("message", (entry) => manager?.handle(entry.data));
   port.on("close", () => { void shutdown(); });

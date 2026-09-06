@@ -1,10 +1,9 @@
-import type { PaneLaunchInfo, SessionState, SplitDirection } from "./types";
+import type { PaneLaunchInfo, SplitDirection } from "./types";
 
 export const APP_CONTEXT = Symbol("shellgrid-app");
 
 export interface AppController {
   getLaunch(paneId: string): PaneLaunchInfo;
-  getSession(paneId: string): SessionState | undefined;
   getActivePane(): string;
   setActivePane(paneId: string): void;
   split(paneId: string, direction: SplitDirection): void;

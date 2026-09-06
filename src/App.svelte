@@ -8,7 +8,7 @@
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { clearTerminal, disposeTerminal, drainTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { disposeTerminal, drainTerminal, fitTerminal, focusTerminal, getTerminal, pasteTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -62,7 +62,6 @@
 
   const controller: AppController = {
     getLaunch: (paneId) => workspace.panes[paneId] ?? makePaneLaunch("C:\\"),
-    getSession: (paneId) => sessions[paneId],
     getActivePane: () => activePaneId,
     setActivePane: (paneId) => {
       activePaneId = paneId;

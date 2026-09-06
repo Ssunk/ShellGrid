@@ -10,21 +10,21 @@ Windows x64 多终端桌面应用，每个窗格对应一个真实 ConPTY 会话
 - PowerShell 默认加载用户 Profile；前台/后台 Shell 使用独立的进程优先级
 - xterm.js、10,000 行历史、搜索、最多 4 个 WebGL 上下文及自动回退
 - 独立 PTY Host、MessagePort 传输、消费确认和有界输出反压
-- Job Object 回收 Shell 及子进程，支持关闭确认和工作区自动保存
+- 直接使用 node-pty/ConPTY 管理 Shell，支持关闭确认和工作区自动保存
 - 文件夹工作区、代理设置、Git 暂存/差异/提交/分支/拉取/推送
 - 将剪贴板图片保存为本地文件并把路径粘贴给 Agent CLI
 
 ## 安装
 
-需要 Windows 10 1903 或更高版本（x64）和 PowerShell 7。安装包已包含 Electron，不需要另装 WebView2、Node 或 Rust。
+需要 Windows 10 1903 或更高版本（x64）和 PowerShell 7。安装包已包含 Electron，不需要另装 WebView2 或 Node。
 
 提供 NSIS EXE 和 MSI，选择其中一种安装。首次从 Tauri 版迁移需先卸载旧程序再安装 Electron 版，业务数据继续保留在 `%LOCALAPPDATA%\ShellGrid`。详见[迁移说明](docs/electron-migration.md)。
 
 ## 开发
 
-技术栈：Electron 42.8.1 / node-pty 1.2.0-beta.15 / xterm 6.1.0-beta.292 / Svelte 5 / TypeScript。Rust 仅用于 Windows 进程启动器。
+技术栈：Electron 42.8.1 / node-pty 1.2.0-beta.15 / xterm 6.1.0-beta.292 / Svelte 5 / TypeScript。
 
-准备 Node 24、npm、Rust 1.82+（MSVC 工具链）和 PowerShell 7：
+准备 Node 24、npm 和 PowerShell 7：
 
 ```powershell
 npm ci
@@ -39,9 +39,6 @@ npm run dev
 npm run check
 npm test
 npm run build
-cargo fmt --manifest-path native\launcher\Cargo.toml -- --check
-cargo test --locked --manifest-path native\launcher\Cargo.toml
-cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings
 npm run test:windows
 npm run bench:windows
 npm run dist:win

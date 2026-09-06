@@ -1,5 +1,4 @@
-import type { LayoutNode, PaneLaunchInfo, SplitDirection, WorkspaceStateV1 } from "./types";
-import { sanitizeProxy } from "./proxy";
+import type { LayoutNode, PaneLaunchInfo, SplitDirection } from "./types";
 
 export const MAX_PANES = 16;
 export const MIN_RATIO = 0.15;
@@ -61,39 +60,4 @@ export function updateRatio(node: LayoutNode, path: string, ratio: number): Layo
 
 export function makePaneLaunch(cwd: string, shell = "pwsh.exe"): PaneLaunchInfo {
   return { cwd, shell, args: ["-NoLogo"] };
-}
-
-export function sanitizeWorkspace(value: unknown, fallback: WorkspaceStateV1): WorkspaceStateV1 {
-  if (!value || typeof value !== "object") return fallback;
-  const state = value as Partial<WorkspaceStateV1>;
-  if (state.schemaVersion !== 1 || !isLayoutNode(state.layout) || !state.panes) return fallback;
-  const ids = paneIds(state.layout);
-  if (ids.length < 1 || ids.length > MAX_PANES || new Set(ids).size !== ids.length) return fallback;
-  for (const id of ids) {
-    const pane = state.panes[id];
-    if (!pane || typeof pane.cwd !== "string" || typeof pane.shell !== "string" || !Array.isArray(pane.args)) {
-      return fallback;
-    }
-  }
-  const workspace = state as WorkspaceStateV1;
-  const proxy = sanitizeProxy(workspace.proxy);
-  // 代理字段损坏时只剥离代理，布局与启动信息保持原样。
-  if (proxy === workspace.proxy) return workspace;
-  const { proxy: _invalid, ...rest } = workspace;
-  return proxy ? { ...rest, proxy } : rest;
-}
-
-function isLayoutNode(value: unknown): value is LayoutNode {
-  if (!value || typeof value !== "object") return false;
-  const node = value as Record<string, unknown>;
-  if (node.type === "pane") return typeof node.paneId === "string" && node.paneId.length > 0;
-  return (
-    node.type === "split" &&
-    (node.direction === "horizontal" || node.direction === "vertical") &&
-    typeof node.ratio === "number" &&
-    node.ratio >= MIN_RATIO &&
-    node.ratio <= MAX_RATIO &&
-    isLayoutNode(node.first) &&
-    isLayoutNode(node.second)
-  );
 }

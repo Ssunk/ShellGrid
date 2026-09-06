@@ -15,7 +15,6 @@ export class HostFixture {
   listener?: (event: TerminalEvent) => void;
   async start(): Promise<void> {
     const hostPath = process.env.SHELLGRID_TEST_HOST_PATH ?? resolve("dist-electron/pty-host.cjs");
-    const launcherPath = process.env.SHELLGRID_TEST_LAUNCHER_PATH ?? resolve("native/launcher/target/release/shellgrid-launcher.exe");
     this.host = utilityProcess.fork(hostPath, [], { serviceName: "ShellGrid verification PTY Host", stdio: "ignore" });
     const { port1, port2 } = new MessageChannelMain();
     this.port = port2;
@@ -32,7 +31,7 @@ export class HostFixture {
       if (data.type === "count") this.count = data.count!;
       if (data.type === "fatal") this.fatalReason = data.reason;
     });
-    this.host.once("spawn", () => this.host.postMessage({ type: "connect", generation: 1, launcherPath, mainPid: process.pid }, [port1]));
+    this.host.once("spawn", () => this.host.postMessage({ type: "connect", generation: 1 }, [port1]));
     await until(() => ready || this.gone, "PTY Host ready");
     check(ready, "PTY Host exited before ready");
   }

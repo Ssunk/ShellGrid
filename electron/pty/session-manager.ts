@@ -3,7 +3,6 @@ import { FLOW_HIGH, FLOW_LOW, MAX_SESSIONS, OUTPUT_BATCH_MS, validCommand, type 
 
 export interface ManagedPty {
   shellPid: number;
-  start(): void;
   write(data: string, binary: boolean): void;
   resize(cols: number, rows: number): void;
   setPriority(focused: boolean): void;
@@ -113,11 +112,10 @@ export class SessionManager {
         this.flush(state);
         pty.resize(state.command.cols, state.command.rows);
         pty.setPriority(state.command.focused);
-        pty.start();
         if (state.exitCode !== undefined) this.exit(state, state.exitCode);
       } catch {
         if (!state.closed) {
-          this.error("无法启动终端，请检查启动目录、PowerShell 和原生启动器", state);
+          this.error("无法启动终端，请检查启动目录和 PowerShell", state);
           // close asynchronously; it waits for this creation promise to settle.
           void this.close(state);
         }

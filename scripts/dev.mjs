@@ -3,7 +3,6 @@ import { createServer } from "vite";
 import electron from "electron";
 import { run, root } from "./run.mjs";
 
-await run("cargo", ["build", "--release", "--locked", "--manifest-path", "native/launcher/Cargo.toml"]);
 await import("./build-electron.mjs");
 const server = await createServer({ root });
 await server.listen();

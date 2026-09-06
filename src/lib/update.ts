@@ -6,7 +6,7 @@ const RELEASE_API = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest
 export interface UpdateInfo {
   /** 规范化后的最新版本号，保留 tag 的原始写法（如 "v0.2.0"）。 */
   version: string;
-  /** GitHub 发布页地址，经 open_external 打开。 */
+  /** GitHub 发布页地址，由桌面端打开。 */
   url: string;
 }
 

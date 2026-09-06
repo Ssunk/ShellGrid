@@ -8,9 +8,6 @@ release/
 artifacts/
 .vite/
 
-# --- Rust / Cargo ---
-native/launcher/target/
-
 # --- Logs ---
 *.log
 

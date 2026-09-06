@@ -1,6 +1,6 @@
 # Electron Windows 验证记录
 
-本页记录 0.3.0 的 Electron 迁移工作区验证结果、复现入口和验收边界。日期使用北京时间（UTC+8）；JSON 报告中的日期使用 UTC。`artifacts` 已被 Git 忽略，原始报告保留在执行测试的机器或 CI artifact 中。
+本页记录 0.3.1 的 Electron + node-pty 终端验证结果、复现入口和验收边界。日期使用北京时间（UTC+8）；JSON 报告中的日期使用 UTC。`artifacts` 已被 Git 忽略，原始报告保留在执行测试的机器或 CI artifact 中。
 
 ## 本轮基础检查
 
@@ -9,16 +9,13 @@
 | 命令 | 结果 |
 | --- | --- |
 | `npm run check` | Svelte 检查 0 错误、0 警告；Electron TypeScript 检查通过 |
-| `npm test` | 前端 6 个文件、37 项测试；服务及协议 9 个文件、39 项测试通过 |
-| `npm run build` | Vite 生产资源、Electron 主进程/preload/PTY Host 和 Rust Release 启动器构建通过 |
-| `cargo fmt --manifest-path native\launcher\Cargo.toml -- --check` | 通过 |
-| `cargo test --locked --manifest-path native\launcher\Cargo.toml` | 3 项测试通过 |
-| `cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings` | 通过 |
-| `npm run test:windows` | 真实 ConPTY、主进程崩溃回收、渲染器和关闭流程通过 |
+| `npm test` | 前端 6 个文件、35 项测试；服务及协议 9 个文件、39 项测试通过 |
+| `npm run build` | Vite 生产资源、Electron 主进程/preload/PTY Host 和 node-pty ConPTY 构建通过 |
+| `npm run test:windows` | 真实 ConPTY、PTY Host、渲染器和关闭流程通过 |
 
-本轮开发工具为 PowerShell 7.6.5、Node 24.19.0、npm 11.17.0、Rust/Cargo 1.98.0。Electron 内置 Node 的版本见后面的运行时记录。构建仍有 xterm 分块超过 500 kB 的 Vite 提示，构建退出码为 0。
+本轮开发工具为 PowerShell 7.6.5、Node 24.19.0、npm 11.17.0。Electron 内置 Node 的版本见后面的运行时记录。构建仍有 xterm 分块超过 500 kB 的 Vite 提示，构建退出码为 0。
 
-单元测试覆盖协议非法消息和 UUID、连接 generation、并发创建、创建中关闭、快速重建、迟到事件隔离、输出顺序、ACK 反压和退出尾部处理；也覆盖工作区兼容与原子保存、Git 路径、输出边界和超时进程树回收、剪贴板图片校验、受限 IPC 和主进程关闭协调。
+单元测试覆盖协议非法消息和 UUID、连接 generation、并发创建、创建中关闭、快速重建、迟到事件隔离、输出顺序、ACK 反压和退出尾部处理；也覆盖工作区兼容与原子保存、Git 路径、输出边界、剪贴板图片校验、受限 IPC 和主进程关闭协调。
 
 ## 真实 Windows 回归
 
@@ -28,27 +25,27 @@
 npm run test:windows
 ```
 
-入口为 [test-windows.mjs](../scripts/test-windows.mjs)。完整运行依次验证 PTY Host、强制结束 Electron 主进程和真实 Electron 渲染器，成功后写入 `artifacts\windows-verification.json`。每次运行的中间结果位于 `artifacts\windows-<时间戳>`。
+入口为 [test-windows.mjs](../scripts/test-windows.mjs)。完整运行依次验证 PTY Host 和真实 Electron 渲染器，成功后写入 `artifacts\windows-verification.json`。每次运行的中间结果位于 `artifacts\windows-<时间戳>`。
 
-本轮 2026-09-06 21:21 完整复测通过，`artifacts\windows-verification.json` 的记录时间为 `2026-09-06T13:21:08.870Z`，包含以下结果：
+本轮 2026-09-06 22:58 完整复测通过，`artifacts\windows-verification.json` 的记录时间为 `2026-09-06T14:58:45.353Z`，包含以下结果：
 
 | 范围 | 已验证内容 |
 | --- | --- |
 | 真实 ConPTY 输出 | 连续输出顺序、尾部标记、退出码、超过高水位暂停和 ACK 后恢复 |
 | 启动与输入 | 创建期间取消、可执行文件不存在、Ctrl+C 后 Shell 继续工作、仅报告 cwd 的集成 |
 | 尺寸与优先级 | 调整到 132×44 并读取实际控制台尺寸、真实 Shell PID 的 Normal/BelowNormal 切换 |
-| 进程树回收 | 自然退出、关闭窗格、终止启动器、PTY Host 崩溃、强制结束主进程时回收 Shell 及 Profile 立即创建的子进程 |
+| 进程生命周期 | 自然退出、关闭窗格和 Host 正常关闭时，直接由 node-pty 管理 Shell 会话 |
 | 并发与资源释放 | 16 个独立 Shell；Host 关闭后回收会话；重复自然退出后释放 node-pty 输出 worker 和输入管道句柄 |
 | 桌面与兼容 | 沙箱、上下文隔离、受限 preload、旧 workspace Bootstrap、非法外链协议拒绝 |
 | 终端实例 | 分割、关闭相邻窗格、窗口缩放和调整尺寸时保留原有 xterm DOM 宿主 |
 | 输入与剪贴板 | 经真实 xterm 输入链路返回中文；剪贴板字节 IPC 保持内容和保存目录 |
 | 关闭流程 | 取消关闭保留会话；保存失败后二次确认可取消；确认关闭保存最新布局并回收会话 |
 
-脚本把 `LOCALAPPDATA` 指向独立测试目录，Profile 回归使用 PowerShell 的独立副本及专用 Profile。测试报告只保存结果、计数、PID 和资源指标，不保存终端内容。
+脚本把 `LOCALAPPDATA` 指向独立测试目录。测试报告只保存结果、计数、PID 和资源指标，不保存终端内容。
 
 UI 自动化使用真实的隐藏窗口，并由测试代码选择确认对话框的回答。中文输入通过 `webContents.insertText` 注入；系统输入法的候选、组合和提交过程仍需人工验收。
 
-可单独运行 `node scripts\test-windows.mjs --host-only` 或 `node scripts\test-windows.mjs --ui-only`。Host-only 会覆盖汇总报告，但其中不含 UI 和主进程崩溃结果；UI-only 仅输出本次目录内的 `ui-report.json`。判断完整回归是否通过时需检查报告包含 `host`、`mainCrash` 和 `ui`。
+可单独运行 `node scripts\test-windows.mjs --host-only` 或 `node scripts\test-windows.mjs --ui-only`。Host-only 会覆盖汇总报告，但其中不含 UI 结果；UI-only 仅输出本次目录内的 `ui-report.json`。判断完整回归是否通过时需检查报告包含 `host` 和 `ui`。
 
 ## 打包与安装器
 
@@ -58,13 +55,13 @@ node scripts\test-windows.mjs --packaged
 npm run test:installers
 ```
 
-`dist:win` 构建 Windows x64 的 NSIS EXE 和 MSI，输出到 `release`。`--packaged` 使用开发依赖中的 Electron 运行测试入口，加载 `release\win-unpacked\resources` 内的 asar、PTY Host、node-pty 和启动器，以验证打包后的模块及路径。汇总 JSON 不记录是否使用了 `--packaged`，应同时保留执行命令和退出结果。
+`dist:win` 构建 Windows x64 的 NSIS EXE 和 MSI，输出到 `release`。`--packaged` 使用开发依赖中的 Electron 运行测试入口，加载 `release\win-unpacked\resources` 内的 asar、PTY Host 和 node-pty，以验证打包后的模块及路径。汇总 JSON 不记录是否使用了 `--packaged`，应同时保留执行命令和退出结果。
 
-[安装器测试](../scripts/verify-installers.ps1) 在仓库内的临时安装目录执行每用户安装、后续版本升级和卸载，检查产品登记版本以及原生 DLL、worker 和启动器文件。脚本遇到已有 ShellGrid 安装或同名快捷方式时会停止。
+[安装器测试](../scripts/verify-installers.ps1) 在仓库内的临时安装目录执行每用户安装、后续版本升级和卸载，检查产品登记版本以及 node-pty 的 DLL、worker 文件。脚本遇到已有 ShellGrid 安装或同名快捷方式时会停止。
 
 数据保留验证对真实 `%LOCALAPPDATA%\ShellGrid` 中的工作区计算哈希，并创建唯一名称的图片测试文件；只在工作区不存在时建立测试工作区。清理时仅删除由本次创建且内容未变的测试文件。原有工作区不会被覆盖。
 
-版本号调整前留存的 `artifacts\installer-verification.json`（2026-09-06 19:15）记录 NSIS、MSI 的 0.2.4 → 0.2.5 测试升级和卸载共 6 项通过，工作区与图片保持不变。该结果不代表 0.3.0 安装器已经验收；发布前仍需重新运行安装器测试。
+本轮 `artifacts\installer-verification.json` 记录 NSIS、MSI 的 0.3.0 → 0.3.1 安装、升级和卸载共 6 项通过，工作区与图片保持不变。
 
 这些测试覆盖安装文件、版本登记和业务数据保留。安装后通过桌面快捷方式启动的完整交互、代码签名及 SmartScreen 体验仍需发布验收；首次从 Tauri 版迁移按[迁移说明](electron-migration.md)先卸载再安装。
 
@@ -77,9 +74,9 @@ npm run build
 npm run bench:windows
 ```
 
-[基准入口](../scripts/bench-windows.mjs) 依次测量 1、4、16 个窗格，写入 `artifacts\windows-benchmark.json`；[测量实现](../tests/windows/benchmark.ts) 使用 Electron Release 运行时、Vite 生产资源和 Rust Release 启动器。
+[基准入口](../scripts/bench-windows.mjs) 依次测量 1、4、16 个窗格，写入 `artifacts\windows-benchmark.json`；[测量实现](../tests/windows/benchmark.ts) 使用 Electron Release 运行时、Vite 生产资源和直接 node-pty ConPTY。
 
-以下数据来自本地留存的 2026-09-06 19:23 报告，本轮没有重新测量。机器与运行条件：
+以下数据来自本轮 2026-09-06 23:05 的 direct node-pty ConPTY 报告。机器与运行条件：
 
 | 项目 | 记录 |
 | --- | --- |
@@ -92,9 +89,9 @@ npm run bench:windows
 
 | 窗格数 | 启动耗时（ms） | 响应 p50 / p95（ms） | 总吞吐（百万字符/s） | 空闲 Electron / PTY 工作集（MiB） | 采样最大 Electron / PTY 工作集（MiB） |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 3746 | 14.9 / 30.8 | 2.07 | 438.5 / 105.6 | 489.1 / 124.1 |
-| 4 | 3904 | 29.3 / 46.0 | 5.86 | 481.0 / 426.5 | 614.2 / 497.1 |
-| 16 | 4690 | 34.6 / 60.1 | 5.65 | 585.8 / 1700.8 | 973.5 / 1967.0 |
+| 1 | 963 | 15.8 / 30.1 | 1.87 | 441.5 / 102.2 | 499.9 / 120.0 |
+| 4 | 836 | 29.5 / 30.9 | 4.22 | 465.6 / 407.9 | 586.1 / 475.8 |
+| 16 | 970 | 40.2 / 79.7 | 4.59 | 572.9 / 1629.1 | 988.7 / 1898.1 |
 
 指标定义：
 
@@ -103,7 +100,7 @@ npm run bench:windows
 - 吞吐测试每窗格输出 40,000 行，统计全部窗格收到的 JavaScript 字符串长度及最终标记到达时间。表中为所有窗格的合计吞吐，不是字节速率。
 - 测试使用真实 xterm 消费与 ACK，但响应和吞吐的计时终点在数据到达渲染器时，不代表最后一次 `xterm.write` 回调或屏幕绘制已完成。
 - 空闲资源在预热和 2 秒等待后采样。负载期间每 750 ms 尝试采样，避免采样任务重叠，结束时追加一次采样；表中的最大值只是观测值。
-- Electron 工作集为 `app.getAppMetrics()` 中各进程工作集之和；PTY 工作集单独统计其原生后代，包括 PowerShell、启动器和 OpenConsole。采样 PowerShell 自身被排除，工作集可能重复包含共享内存页。
+- Electron 工作集为 `app.getAppMetrics()` 中各进程工作集之和；PTY 工作集单独统计其后代，包括 PowerShell 和 OpenConsole。采样 PowerShell 自身被排除，工作集可能重复包含共享内存页。
 - 原始报告中的 Electron CPU 为进程百分比之和；PTY CPU 为 CIM 用户态与内核态累计秒数，`ptyCpuSecondsDelta` 是输出阶段消耗的 CPU 秒数，不能当作 CPU 百分比或峰值。
 
 隐藏窗口、合成命令和 `-NoProfile` 不覆盖可见窗口的输入到绘制延迟、用户 Profile 开销或 Agent CLI 负载。该样本也没有 Tauri 对照组，不能用于宣称迁移后的性能提升。

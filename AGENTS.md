@@ -4,9 +4,9 @@
 
 ## 项目概览
 
-ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelte 5、TypeScript、node-pty 1.2.0-beta.15 和 xterm 6.1.0-beta.292。Electron 主进程负责桌面服务，单个 utilityProcess PTY Host 管理全部 ConPTY 会话。Rust 仅用于受 Job Object 保护的原生启动器。
+ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelte 5、TypeScript、node-pty 1.2.0-beta.15 和 xterm 6.1.0-beta.292。Electron 主进程负责桌面服务，单个 utilityProcess PTY Host 管理全部 ConPTY 会话，直接使用 node-pty 创建 ConPTY。
 
-运行要求：Windows 10 1903+、PowerShell 7。安装包自带 Electron，不需要 WebView2、Node 或 Rust。开发要求 Node 24/npm、Rust 1.82+ 和 MSVC 工具链。命令在 Windows PowerShell 中运行，路径使用反斜杠。如需 Python，使用 `D:\workspace\python_venv\Scripts\python.exe`。
+运行要求：Windows 10 1903+、PowerShell 7。安装包自带 Electron，不需要 WebView2 或 Node。开发要求 Node 24/npm。命令在 Windows PowerShell 中运行，路径使用反斜杠。如需 Python，使用 `D:\workspace\python_venv\Scripts\python.exe`。
 
 ## 目录与职责
 
@@ -21,10 +21,9 @@ ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelt
 - `electron/terminal-service.ts`、`pty-host.ts`、`pty/`：utilityProcess 生命周期、会话所有权、node-pty 和输出反压。
 - `electron/close-coordinator.ts`：主进程关闭确认、获取最新布局、保存、回收会话和最终退出。
 - `electron/services/`：工作区、剪贴板图片、Git 和运行环境探测。
-- `native/launcher/`：挂起创建进程、Job Object、真实 Shell PID、独立命名管道和父进程存活监测。
 - `scripts/`、`tests/windows/`：构建、真实 Windows 回归和 Release 性能测量。
 
-不要手工编辑 node_modules、dist、dist-electron、release 或 native/launcher/target 中的生成文件。Rust 启动器以外不再保留 Tauri 工程。
+不要手工编辑 node_modules、dist、dist-electron、release 中的生成文件。仓库不再保留 Tauri 或其他启动器工程。
 
 ## 核心不变量
 
@@ -54,11 +53,8 @@ ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelt
 
 ## 进程和数据约定
 
-- node-pty 为原生启动器创建 ConPTY，不得用重定向管道代替 PTY。
-- 启动器用 CREATE_SUSPENDED 创建 Shell，先加入 KILL_ON_JOB_CLOSE Job，再恢复。Profile 的第一个子进程也必须受保护，失败路径不能遗留挂起进程。
-- Job 句柄不可继承，只有启动器持有。主进程退出、Host 退出、控制管道断开、启动器被终止和正常关闭均必须回收子进程树。
-- 启动器继承真实控制台，只处理生命周期控制消息；不得读取/转发终端内容。Ctrl+C 使用不被子进程继承的控制处理器，不使用继承的忽略标志或 CREATE_NEW_PROCESS_GROUP。
-- 同步命名管道不能用重复句柄并发阻塞读写；使用 PeekNamedPipe 后读取已就绪的字节，保持存活检查和就绪/退出通知可推进。
+- node-pty 直接创建 ConPTY，不得用重定向管道代替 PTY。
+- 关闭会话调用 node-pty 的 PTY 关闭接口；不额外维护进程树守护进程，也不承诺替代 node-pty 的子进程树回收语义。
 - node-pty 1.2.0-beta.15 在自然 EOF 后需要额外释放 Windows 输入 socket 和输出 worker；适配集中在 NodePtyFactory，仅在 onExit 后执行。升级依赖时必须重新核对其内部结构并运行资源释放回归。
 - 通过真实 Shell PID 设置 NORMAL / BELOW_NORMAL 优先级；后续新建子进程继承其优先级类，既有后代不会自动全部更新。
 - 工作区仍位于 `%LOCALAPPDATA%\ShellGrid\workspace.json`，schemaVersion 为 1；旧 rootPath 补全、无效代理剥离、损坏文件保留和串行原子保存必须兼容。
@@ -75,9 +71,6 @@ npm run dev
 npm run check
 npm test
 npm run build
-cargo fmt --manifest-path native\launcher\Cargo.toml -- --check
-cargo test --locked --manifest-path native\launcher\Cargo.toml
-cargo clippy --locked --manifest-path native\launcher\Cargo.toml --all-targets -- -D warnings
 npm run test:windows
 npm run bench:windows
 npm run dist:win
@@ -87,11 +80,11 @@ npm run test:installers
 
 `npm run dev` 启动完整 Electron 桌面和 Vite HMR；Electron/preload/Host 源码改动后重启开发命令。`npm run dev:web` 仅预览界面，不能验证桌面服务或 PTY。产物位于 release，运行程序位于 release\win-unpacked。
 
-- 交付前至少运行类型检查、前端/服务测试、完整构建、Rust 测试、格式和 Clippy。改动进程、传输或关闭流程时运行真实 Windows 套件；修改安装配置时构建并验证两种安装包。
+- 交付前至少运行类型检查、前端/服务测试、完整构建。改动进程、传输或关闭流程时运行真实 Windows 套件；修改安装配置时构建并验证两种安装包。
 - 协议覆盖非法消息、UUID、并发创建、创建中关闭、快速重启、旧代次、输出顺序、ACK 反压和尾部退出。挂载改动验证 xterm 不重建。
 - VT/渲染回归包括备用屏幕、TrueColor、宽/组合字符、输入法、鼠标、焦点、括号粘贴、OSC 8、快速刷新和缩放。
 - 性能结论只来自 Release 运行时和可重复脚本；测量时不能同时运行其他 ShellGrid 测试。指标定义、机器信息和限制一起记录。
-- Windows 测试使用临时数据目录和独立 PowerShell Profile 副本，不覆盖用户 Profile/工作区；报告只保存结果、计数、PID 和资源指标。
+- Windows 测试使用临时数据目录，不覆盖用户 Profile/工作区；报告只保存结果、计数、PID 和资源指标。
 
 ## 已知边界
 
@@ -99,6 +92,6 @@ npm run test:installers
 
 ## 修改与提交原则
 
-保持改动聚焦；优先厘清 paneId、sessionId、xterm、PTY Host、启动器和 OS 进程的所有权。新增依赖先确认现有依赖或标准库不能解决，并更新锁文件。
+保持改动聚焦；优先厘清 paneId、sessionId、xterm、PTY Host 和 OS 进程的所有权。新增依赖先确认现有依赖或标准库不能解决，并更新锁文件。
 
 创建提交前先看近期 git log。使用 Conventional Commits：`type: 中文简洁描述`，类型小写，冒号后一个空格，单行、无句号。通常不加 scope；不得包含 Co-Authored-By 或 AI 工具署名。常用类型 feat、fix、chore、docs、test、refactor、perf、build、ci。
