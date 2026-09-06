@@ -21,7 +21,9 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
-      - run: npm run test:windows
+      # GitHub-hosted Windows runner 不执行隐藏桌面的 UI smoke；该测试在本地运行。
+      - name: 验证真实 ConPTY Host
+        run: npm run test:windows -- --host-only
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -46,8 +48,9 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw '版本标签与 package.json 不一致' }
       - run: npm ci
       - run: npm run dist:win
+      # 打包验证同样只检查 Host，UI smoke 保留给本地桌面环境。
       - name: 验证打包后的原生模块和磁盘路径
-        run: node scripts\test-windows.mjs --packaged
+        run: node scripts\test-windows.mjs --packaged --host-only
       - name: 验证安装、后续版本升级、卸载和数据保留
         run: npm run test:installers
       - name: 记录 Release 运行时的多窗格测量
