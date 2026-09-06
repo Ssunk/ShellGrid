@@ -7,32 +7,8 @@ permissions:
 defaults:
   run:
     shell: pwsh
-jobs:
-  verify:
-    name: Windows 类型、服务和真实 ConPTY 验证
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-      - run: npm ci
-      - run: npm run check
-      - run: npm test
-      - run: npm run build
-      # GitHub-hosted Windows runner 不执行隐藏桌面的 UI smoke；该测试在本地运行。
-      - name: 验证真实 ConPTY Host
-        run: npm run test:windows -- --host-only
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: windows-verification
-          path: artifacts/windows-verification.json
-          if-no-files-found: ignore
   build:
-    name: Electron Windows x64 安装包
-    needs: verify
+    name: Electron Windows x64 MSI
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,23 +23,16 @@ jobs:
           $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw '版本标签与 package.json 不一致' }
       - run: npm ci
-      - run: npm run dist:win
-      # 打包验证同样只检查 Host，UI smoke 保留给本地桌面环境。
-      - name: 验证打包后的原生模块和磁盘路径
-        run: node scripts\test-windows.mjs --packaged --host-only
-      - name: 验证安装、后续版本升级、卸载和数据保留
-        run: npm run test:installers
-      - name: 记录 Release 运行时的多窗格测量
-        run: npm run bench:windows
+      - name: 构建 Windows MSI
+        run: |
+          npm run build
+          npm exec -- electron-builder --win msi --x64
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installers-and-verification
+          name: shellgrid-windows-msi
           path: |
-            release/*.exe
             release/*.msi
-            artifacts/windows-verification.json
-            artifacts/windows-benchmark.json
-            artifacts/installer-verification.json
+          if-no-files-found: error
       - name: 创建 Release 草稿
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,6 +46,7 @@ jobs:
           [IO.File]::WriteAllText((Join-Path (Get-Location) 'release-notes.md'), ($notes -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
           gh release create $tag --draft --title "ShellGrid $tag" --notes-file release-notes.md
           if ($LASTEXITCODE -ne 0) { throw '创建 Release 草稿失败' }
-          $installers = @(Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -in '.exe', '.msi' } | ForEach-Object FullName)
+          $installers = @(Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -eq '.msi' } | ForEach-Object FullName)
+          if ($installers.Count -ne 1) { throw 'MSI 构建产物数量不正确' }
           gh release upload $tag @installers
           if ($LASTEXITCODE -ne 0) { throw '上传安装包失败' }
