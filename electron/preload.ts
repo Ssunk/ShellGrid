@@ -52,6 +52,8 @@ const api: ShellGridAPI = {
   chooseDirectory: (defaultPath) => invoke("directory:choose", defaultPath),
   confirm: (message) => invoke("dialog:confirm", message),
   openExternal: (url) => invoke("external:open", url),
+  readClipboardText: () => invoke("clipboard:readText"),
+  writeClipboardText: (text) => invoke("clipboard:writeText", text),
   onWorkspaceRequest(provider) {
     workspaceProvider = provider;
     ipcRenderer.send("workspace:ready");

@@ -37,6 +37,20 @@ export function configureTerminals(value: ConnectionInfo["windowsPty"]): void {
   for (const entry of terminals.values()) entry.terminal.options.windowsPty = value;
 }
 
+function handleRightClick(event: MouseEvent, terminal: Terminal): void {
+  // VS Code's Windows default: copy and clear a selection, otherwise paste.
+  // Keep web-only preview behavior intact when the validated desktop API is absent.
+  if (!window.shellgrid) return;
+  event.preventDefault();
+  const api = desktop();
+  if (terminal.hasSelection()) {
+    const selection = terminal.getSelection();
+    void api.writeClipboardText(selection).then(() => terminal.clearSelection()).catch(() => {});
+  } else {
+    void api.readClipboardText().then((text) => terminal.paste(text)).catch(() => {});
+  }
+}
+
 const SEARCH_DECORATIONS = {
   matchBackground: "#3b5e4a",
   activeMatchBackground: "#5a8f6d",
@@ -139,6 +153,7 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   });
   container.addEventListener("focusin", () => callbacks.onFocus(paneId));
   container.addEventListener("pointerdown", () => callbacks.onFocus(paneId));
+  container.addEventListener("contextmenu", (event) => handleRightClick(event, terminal));
 
   const registered: RegisteredTerminal = {
     terminal,

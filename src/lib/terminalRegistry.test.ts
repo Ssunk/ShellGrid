@@ -14,6 +14,10 @@ class TerminalMock {
   onTitleChange = vi.fn();
   onResize = vi.fn();
   focus = vi.fn();
+  hasSelection = vi.fn(() => false);
+  getSelection = vi.fn(() => "");
+  clearSelection = vi.fn();
+  paste = vi.fn();
   dispose = vi.fn();
   reset = vi.fn();
   write = vi.fn();
@@ -54,7 +58,7 @@ function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unkn
 
 afterEach(async () => {
   const { disposeTerminal } = await import("./terminalRegistry");
-  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane"]) disposeTerminal(id);
+  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane", "copy-pane", "paste-pane"]) disposeTerminal(id);
   Reflect.deleteProperty(window, "shellgrid");
 });
 
@@ -131,6 +135,42 @@ describe("terminal registry", () => {
     entry.container.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("copies and clears a selection on right click", async () => {
+    const writeClipboardText = vi.fn(async () => {});
+    Object.defineProperty(window, "shellgrid", { configurable: true, value: { writeClipboardText } });
+    const { getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("copy-pane", makeCallbacks() as never);
+    const terminal = entry.terminal as unknown as TerminalMock;
+    terminal.hasSelection.mockReturnValue(true);
+    terminal.getSelection.mockReturnValue("selected text");
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    entry.container.dispatchEvent(event);
+    await Promise.resolve();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(writeClipboardText).toHaveBeenCalledWith("selected text");
+    expect(terminal.clearSelection).toHaveBeenCalledOnce();
+    expect(terminal.paste).not.toHaveBeenCalled();
+  });
+
+  it("pastes the system clipboard on right click without a selection", async () => {
+    const readClipboardText = vi.fn(async () => "clipboard text");
+    Object.defineProperty(window, "shellgrid", { configurable: true, value: { readClipboardText } });
+    const { getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("paste-pane", makeCallbacks() as never);
+    const terminal = entry.terminal as unknown as TerminalMock;
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    entry.container.dispatchEvent(event);
+    await Promise.resolve();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(readClipboardText).toHaveBeenCalledOnce();
+    expect(terminal.paste).toHaveBeenCalledWith("clipboard text");
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
   });
 
   it("searches the pane buffer and clears decorations on empty query", async () => {

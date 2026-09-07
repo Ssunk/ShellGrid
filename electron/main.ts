@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type IpcMainInvokeEvent, type IpcMainEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, type IpcMainInvokeEvent, type IpcMainEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -123,6 +123,11 @@ async function start(): Promise<void> {
   handle("bootstrap", () => ({ ...bootstrap, workspace: latestWorkspace }));
   handle("workspace:save", save);
   handle("external:open", (value) => shell.openExternal(externalUrl(value)));
+  handle("clipboard:readText", () => clipboard.readText());
+  handle("clipboard:writeText", (value) => {
+    if (!textValue(value, 10_000_000, true)) throw new Error("剪贴板文本无效");
+    clipboard.writeText(value);
+  });
   handle("dialog:confirm", (value) => {
     if (!textValue(value, 8192)) throw new Error("确认消息无效");
     return confirm(value);

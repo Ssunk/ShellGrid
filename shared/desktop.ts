@@ -21,6 +21,8 @@ export interface ShellGridAPI {
   chooseDirectory(defaultPath: string): Promise<string | null>;
   confirm(message: string): Promise<boolean>;
   openExternal(url: string): Promise<void>;
+  readClipboardText(): Promise<string>;
+  writeClipboardText(text: string): Promise<void>;
   onWorkspaceRequest(provider: () => WorkspaceStateV1): () => void;
   git: {
     status(path: string): Promise<GitStatus>;
