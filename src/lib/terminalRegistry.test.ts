@@ -17,7 +17,6 @@ class TerminalMock {
   dispose = vi.fn();
   reset = vi.fn();
   write = vi.fn();
-  paste = vi.fn();
 }
 
 interface SearchAddonMock {
@@ -48,14 +47,14 @@ vi.mock("@xterm/addon-search", () => ({
 
 function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onBinaryInput: vi.fn(), onPasteImages: vi.fn(),
+    onCwd: vi.fn(), onTitle: vi.fn(), onInput: vi.fn(), onBinaryInput: vi.fn(),
     onFocus: vi.fn(), onResize: vi.fn(), onSearchResults: vi.fn(), ...extra,
   };
 }
 
 afterEach(async () => {
   const { disposeTerminal } = await import("./terminalRegistry");
-  for (const id of ["stable-pane", "image-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane"]) disposeTerminal(id);
+  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane"]) disposeTerminal(id);
   Reflect.deleteProperty(window, "shellgrid");
 });
 
@@ -121,29 +120,9 @@ describe("terminal registry", () => {
     expect(terminalCount()).toBe(1);
   });
 
-  it("intercepts clipboard images before xterm handles the paste", async () => {
-    const { getTerminal } = await import("./terminalRegistry");
-    const onPasteImages = vi.fn();
-    const entry = getTerminal("image-pane", { ...makeCallbacks(), onPasteImages } as never);
-    const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "shot.png", { type: "image/png" });
-    const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", {
-      value: {
-        items: [{ kind: "file", type: "image/png", getAsFile: () => image }],
-        files: [],
-      },
-    });
-
-    entry.container.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(onPasteImages).toHaveBeenCalledWith("image-pane", [image]);
-  });
-
   it("leaves text paste events for xterm", async () => {
     const { getTerminal } = await import("./terminalRegistry");
-    const onPasteImages = vi.fn();
-    const entry = getTerminal("text-pane", { ...makeCallbacks(), onPasteImages } as never);
+    const entry = getTerminal("text-pane", makeCallbacks() as never);
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
       value: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }], files: [] },
@@ -152,7 +131,6 @@ describe("terminal registry", () => {
     entry.container.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
-    expect(onPasteImages).not.toHaveBeenCalled();
   });
 
   it("searches the pane buffer and clears decorations on empty query", async () => {

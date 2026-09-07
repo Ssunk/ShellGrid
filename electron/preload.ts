@@ -49,7 +49,6 @@ ipcRenderer.on("workspace:request", (_event, id: string) => {
 const api: ShellGridAPI = {
   getBootstrap: () => invoke("bootstrap"),
   saveWorkspace: (workspace) => invoke("workspace:save", workspace),
-  saveClipboardImage: (data) => invoke("clipboard:save", data),
   chooseDirectory: (defaultPath) => invoke("directory:choose", defaultPath),
   confirm: (message) => invoke("dialog:confirm", message),
   openExternal: (url) => invoke("external:open", url),

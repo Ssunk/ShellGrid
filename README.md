@@ -12,7 +12,6 @@ Windows x64 多终端桌面应用，每个窗格对应一个真实 ConPTY 会话
 - 独立 PTY Host、MessagePort 传输、消费确认和有界输出反压
 - 直接使用 node-pty/ConPTY 管理 Shell，支持关闭确认和工作区自动保存
 - 文件夹工作区、代理设置、Git 暂存/差异/提交/分支/拉取/推送
-- 将剪贴板图片保存为本地文件并把路径粘贴给 Agent CLI
 
 ## 安装
 

@@ -5,7 +5,6 @@ import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { WorkspaceStore } from "./services/workspace";
 import { environment } from "./services/environment";
-import { saveClipboardImage } from "./services/clipboard";
 import { GitService } from "./services/git";
 import { CloseCoordinator } from "./close-coordinator";
 import { TerminalService } from "./terminal-service";
@@ -14,8 +13,8 @@ import { parseWorkspace } from "../shared/workspace";
 import { textValue, uuid } from "../shared/protocol";
 import type { Bootstrap, WorkspaceStateV1 } from "../src/lib/types";
 
-// A separate Chromium profile keeps the existing workspace and image directory
-// independent of Electron cache management and installer upgrade behavior.
+// A separate Chromium profile keeps the existing workspace independent of
+// Electron cache management and installer upgrade behavior.
 const dataDirectory = join(process.env.LOCALAPPDATA ?? homedir(), "ShellGrid");
 app.setPath("userData", join(dataDirectory, "electron"));
 app.setAppUserModelId("io.shellgrid.desktop");
@@ -123,7 +122,6 @@ async function start(): Promise<void> {
   };
   handle("bootstrap", () => ({ ...bootstrap, workspace: latestWorkspace }));
   handle("workspace:save", save);
-  handle("clipboard:save", (value) => saveClipboardImage(join(dataDirectory, "clipboard-images"), value));
   handle("external:open", (value) => shell.openExternal(externalUrl(value)));
   handle("dialog:confirm", (value) => {
     if (!textValue(value, 8192)) throw new Error("确认消息无效");

@@ -79,10 +79,7 @@ async function test() {
   currentWindow.webContents.sendInputEvent({ type: "keyDown", keyCode: "Return" });
   currentWindow.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
   await until(() => evaluate<boolean>("window.__sgText.includes('UI-输入成功')"), "Unicode keyboard terminal input");
-  const imagePath = await evaluate<string>("window.shellgrid.saveClipboardImage(new Uint8Array([137,80,78,71,13,10,26,10,1,2,3]))");
-  check(imagePath.startsWith(join(dataDirectory, "clipboard-images")), "Image IPC escaped its directory");
-  check((await readFile(imagePath)).length === 11, "Clipboard IPC changed bytes");
-  results.push("stable xterm across split, live resize/zoom, Unicode input and clipboard byte IPC");
+  results.push("stable xterm across split, live resize/zoom and Unicode input");
   answers.push(1);
   await evaluate("document.querySelectorAll('.terminal-pane .close-button')[1].click();true");
   await running(1);

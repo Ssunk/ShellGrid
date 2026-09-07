@@ -18,7 +18,6 @@ export interface TerminalBridge {
 export interface ShellGridAPI {
   getBootstrap(): Promise<Bootstrap>;
   saveWorkspace(workspace: WorkspaceStateV1): Promise<void>;
-  saveClipboardImage(data: Uint8Array): Promise<string>;
   chooseDirectory(defaultPath: string): Promise<string | null>;
   confirm(message: string): Promise<boolean>;
   openExternal(url: string): Promise<void>;

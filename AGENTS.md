@@ -20,7 +20,7 @@ ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelt
 - `electron/main.ts`、`preload.ts`、`security.ts`：窗口、受限 IPC 和调用来源校验。
 - `electron/terminal-service.ts`、`pty-host.ts`、`pty/`：utilityProcess 生命周期、会话所有权、node-pty 和输出反压。
 - `electron/close-coordinator.ts`：主进程关闭确认、获取最新布局、保存、回收会话和最终退出。
-- `electron/services/`：工作区、剪贴板图片、Git 和运行环境探测。
+- `electron/services/`：工作区、Git 和运行环境探测。
 - `scripts/`、`tests/windows/`：构建、真实 Windows 回归和 Release 性能测量。
 
 不要手工编辑 node_modules、dist、dist-electron、release 中的生成文件。仓库不再保留 Tauri 或其他启动器工程。
@@ -49,7 +49,6 @@ ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelt
 - bundled ConPTY 支持现代 reflow；windowsPty 配置的兼容特征应与实际后端一致。改变缩放、初始化或 VT 行为时验证真实 ConPTY。
 - 快捷键不得占用 Ctrl+C、Ctrl+V、Enter、Escape、Shift+Tab 等 Shell/Agent 常用键。
 - 默认中文界面，Shell/Agent 输出保持原样。
-- 剪贴板图片只粘贴本地文件路径，IPC 使用字节数组，最大 20 MiB；保留图片格式检查和七天清理规则。
 
 ## 进程和数据约定
 
@@ -59,7 +58,7 @@ ShellGrid 是 Windows x64 多终端桌面应用，采用 Electron 42.8.1、Svelt
 - 通过真实 Shell PID 设置 NORMAL / BELOW_NORMAL 优先级；后续新建子进程继承其优先级类，既有后代不会自动全部更新。
 - 工作区仍位于 `%LOCALAPPDATA%\ShellGrid\workspace.json`，schemaVersion 为 1；旧 rootPath 补全、无效代理剥离、损坏文件保留和串行原子保存必须兼容。
 - 不能读取或保留损坏工作区时禁止覆盖原文件。临时保存文件必须和目标同目录，写入并 sync 后 rename。
-- Chromium 用户数据单独放在 ShellGrid\electron；剪贴板图片继续放在 ShellGrid\clipboard-images。安装及卸载不能清理这两个业务数据文件/目录。
+- Chromium 用户数据单独放在 ShellGrid\electron；安装及卸载不能清理工作区数据。
 - Git 参数通过 spawn 数组传入，不通过 Shell 拼接；文件使用 literal pathspec，未跟踪预览不能越过仓库边界。保留 diff/消息输出上限以及恢复、强制推送确认流程。
 - 关闭确认在主进程协调；取消保留应用和进程，确认获取最新布局并保存后关闭会话，最终关闭必须绕过重复确认。保存失败仍需单独确认。
 

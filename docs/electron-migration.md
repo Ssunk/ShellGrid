@@ -12,11 +12,10 @@
 | 内容 | 路径 |
 | --- | --- |
 | 工作区（schemaVersion 1） | `%LOCALAPPDATA%\ShellGrid\workspace.json` |
-| 剪贴板图片 | `%LOCALAPPDATA%\ShellGrid\clipboard-images` |
 | Electron/Chromium 缓存与偏好 | `%LOCALAPPDATA%\ShellGrid\electron` |
 | 损坏工作区备份 | `%LOCALAPPDATA%\ShellGrid\workspace.corrupt-*.json` |
 
-安装/卸载脚本不删除工作区或剪贴板图片。Electron 缓存与工作区分开；NSIS 的 deleteAppDataOnUninstall 明确关闭，MSI 不把用户业务数据登记为安装文件。需要备份时，复制工作区和图片目录即可。
+安装/卸载脚本不删除工作区。Electron 缓存与工作区分开；NSIS 的 deleteAppDataOnUninstall 明确关闭，MSI 不把用户业务数据登记为安装文件。需要备份时，复制工作区文件即可。
 
 后续 Electron 版本使用稳定 appId `io.shellgrid.desktop` 和产品名称；递增版本后，使用与已安装版本相同的安装器正常升级。EXE 与 MSI 之间切换时先卸载旧安装器版本。发布包尚未配置代码签名证书。
 

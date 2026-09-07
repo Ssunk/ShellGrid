@@ -20,7 +20,6 @@ interface RegistryCallbacks {
   onTitle(paneId: string, title: string): void;
   onInput(paneId: string, data: string): void;
   onBinaryInput(paneId: string, data: string): void;
-  onPasteImages(paneId: string, images: File[]): void;
   onFocus(paneId: string): void;
   onResize(paneId: string, cols: number, rows: number): void;
   onSearchResults(paneId: string, current: number, total: number): void;
@@ -138,24 +137,6 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
     if (data.startsWith("9;")) callbacks.onCwd(paneId, data.slice(2));
     return true;
   });
-  // xterm 的默认 paste 处理器只读取 text/plain。使用捕获阶段先取出剪贴板中的
-  // 位图，避免事件到达 xterm 后被转换为空文本；普通文本仍完全交给 xterm，
-  // 从而保留换行规范化和 bracketed paste 行为。
-  container.addEventListener("paste", (event) => {
-    const clipboard = event.clipboardData;
-    if (!clipboard) return;
-    const itemImages = [...clipboard.items]
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null);
-    const images = itemImages.length > 0
-      ? itemImages
-      : [...clipboard.files].filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    callbacks.onPasteImages(paneId, images);
-  }, true);
   container.addEventListener("focusin", () => callbacks.onFocus(paneId));
   container.addEventListener("pointerdown", () => callbacks.onFocus(paneId));
 
@@ -190,10 +171,6 @@ export function drainTerminal(paneId: string): Promise<void> {
   const entry = terminals.get(paneId);
   if (!entry) return Promise.resolve();
   return new Promise((resolve) => entry.terminal.write("", resolve));
-}
-
-export function pasteTerminal(paneId: string, text: string): void {
-  terminals.get(paneId)?.terminal.paste(text);
 }
 
 export function fitTerminal(paneId: string): void {

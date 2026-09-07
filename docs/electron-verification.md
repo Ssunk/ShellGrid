@@ -9,13 +9,13 @@
 | 命令 | 结果 |
 | --- | --- |
 | `npm run check` | Svelte 检查 0 错误、0 警告；Electron TypeScript 检查通过 |
-| `npm test` | 前端 6 个文件、35 项测试；服务及协议 9 个文件、39 项测试通过 |
+| `npm test` | 前端 6 个文件、34 项测试；服务及协议 8 个文件、35 项测试通过 |
 | `npm run build` | Vite 生产资源、Electron 主进程/preload/PTY Host 和 node-pty ConPTY 构建通过 |
 | `npm run test:windows` | 真实 ConPTY、PTY Host、渲染器和关闭流程通过 |
 
 本轮开发工具为 PowerShell 7.6.5、Node 24.19.0、npm 11.17.0。Electron 内置 Node 的版本见后面的运行时记录。构建仍有 xterm 分块超过 500 kB 的 Vite 提示，构建退出码为 0。
 
-单元测试覆盖协议非法消息和 UUID、连接 generation、并发创建、创建中关闭、快速重建、迟到事件隔离、输出顺序、ACK 反压和退出尾部处理；也覆盖工作区兼容与原子保存、Git 路径、输出边界、剪贴板图片校验、受限 IPC 和主进程关闭协调。
+单元测试覆盖协议非法消息和 UUID、连接 generation、并发创建、创建中关闭、快速重建、迟到事件隔离、输出顺序、ACK 反压和退出尾部处理；也覆盖工作区兼容与原子保存、Git 路径、输出边界、受限 IPC 和主进程关闭协调。
 
 ## 真实 Windows 回归
 
@@ -38,7 +38,7 @@ npm run test:windows
 | 并发与资源释放 | 16 个独立 Shell；Host 关闭后回收会话；重复自然退出后释放 node-pty 输出 worker 和输入管道句柄 |
 | 桌面与兼容 | 沙箱、上下文隔离、受限 preload、旧 workspace Bootstrap、非法外链协议拒绝 |
 | 终端实例 | 分割、关闭相邻窗格、窗口缩放和调整尺寸时保留原有 xterm DOM 宿主 |
-| 输入与剪贴板 | 经真实 xterm 输入链路返回中文；剪贴板字节 IPC 保持内容和保存目录 |
+| 输入 | 经真实 xterm 输入链路返回中文 |
 | 关闭流程 | 取消关闭保留会话；保存失败后二次确认可取消；确认关闭保存最新布局并回收会话 |
 
 脚本把 `LOCALAPPDATA` 指向独立测试目录。测试报告只保存结果、计数、PID 和资源指标，不保存终端内容。
@@ -59,9 +59,9 @@ npm run test:installers
 
 [安装器测试](../scripts/verify-installers.ps1) 在仓库内的临时安装目录执行每用户安装、后续版本升级和卸载，检查产品登记版本以及 node-pty 的 DLL、worker 文件。脚本遇到已有 ShellGrid 安装或同名快捷方式时会停止。
 
-数据保留验证对真实 `%LOCALAPPDATA%\ShellGrid` 中的工作区计算哈希，并创建唯一名称的图片测试文件；只在工作区不存在时建立测试工作区。清理时仅删除由本次创建且内容未变的测试文件。原有工作区不会被覆盖。
+数据保留验证对真实 `%LOCALAPPDATA%\ShellGrid` 中的工作区计算哈希；只在工作区不存在时建立测试工作区。清理时仅删除由本次创建且内容未变的测试文件。原有工作区不会被覆盖。
 
-本轮 `artifacts\installer-verification.json` 记录 NSIS、MSI 的 0.3.0 → 0.3.1 安装、升级和卸载共 6 项通过，工作区与图片保持不变。
+本轮 `artifacts\installer-verification.json` 记录 NSIS、MSI 的 0.3.0 → 0.3.1 安装、升级和卸载共 6 项通过，工作区保持不变。
 
 这些测试覆盖安装文件、版本登记和业务数据保留。安装后通过桌面快捷方式启动的完整交互、代码签名及 SmartScreen 体验仍需发布验收；首次从 Tauri 版迁移按[迁移说明](electron-migration.md)先卸载再安装。
 

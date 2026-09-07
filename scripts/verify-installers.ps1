@@ -36,22 +36,15 @@ foreach ($path in @($oldExe, $oldMsi, $newExe, $newMsi)) {
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $dataDirectory = Join-Path $env:LOCALAPPDATA 'ShellGrid'
 $workspacePath = Join-Path $dataDirectory 'workspace.json'
-$imagesDirectory = Join-Path $dataDirectory 'clipboard-images'
 $createdDataDirectory = -not (Test-Path -LiteralPath $dataDirectory)
-$createdImagesDirectory = -not (Test-Path -LiteralPath $imagesDirectory)
 $createdWorkspace = -not (Test-Path -LiteralPath $workspacePath)
-New-Item -ItemType Directory -Path $imagesDirectory -Force | Out-Null
 if ($createdWorkspace) {
   [IO.File]::WriteAllText($workspacePath, '{"schemaVersion":1,"layout":{"type":"pane","paneId":"installer-fixture"},"panes":{"installer-fixture":{"cwd":"C:\\","shell":"pwsh.exe","args":["-NoLogo"]}}}', [Text.UTF8Encoding]::new($false))
 }
-$imagePath = Join-Path $imagesDirectory ('clipboard-installation-fixture-' + [Guid]::NewGuid() + '.png')
-[IO.File]::WriteAllBytes($imagePath, [byte[]](137,80,78,71,13,10,26,10,1,2,3))
 $workspaceHash = (Get-FileHash -LiteralPath $workspacePath -Algorithm SHA256).Hash
-$imageHash = (Get-FileHash -LiteralPath $imagePath -Algorithm SHA256).Hash
 $results = [Collections.Generic.List[string]]::new()
 function Check-Data {
   if ((Get-FileHash -LiteralPath $workspacePath -Algorithm SHA256).Hash -ne $workspaceHash) { throw 'Installer changed workspace data' }
-  if ((Get-FileHash -LiteralPath $imagePath -Algorithm SHA256).Hash -ne $imageHash) { throw 'Installer changed clipboard image data' }
 }
 function Run-Installer([string]$Executable, [string[]]$Arguments) {
   # NSIS requires /D=... last and unquoted, even when the directory has spaces.
@@ -92,13 +85,13 @@ try {
   $results.Add('NSIS fresh per-user install and Electron/node-pty runtime paths')
   Run-Installer $newExe @('/S', '/currentuser', "/D=$exeTarget")
   Check-Installation $exeTarget $nextVersion
-  $results.Add('NSIS subsequent version upgrade preserves workspace and images')
+  $results.Add('NSIS subsequent version upgrade preserves workspace')
   Run-Installer $activeUninstaller @('/S', '/currentuser')
   $activeUninstaller = $null
   Check-Data
   if (@(Installed-ShellGrid).Count) { throw 'NSIS uninstall left an installed product entry' }
   if (Test-Path -LiteralPath (Join-Path $exeTarget 'ShellGrid.exe')) { throw 'NSIS uninstall left the application installed' }
-  $results.Add('NSIS uninstall preserves workspace and images')
+  $results.Add('NSIS uninstall preserves workspace')
 
   $msiTarget = Join-Path $testRoot 'msi-app'
   Run-Installer 'msiexec.exe' @('/i', $oldMsi, '/qn', '/norestart', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', "APPLICATIONFOLDER=$msiTarget")
@@ -108,13 +101,13 @@ try {
   Run-Installer 'msiexec.exe' @('/i', $newMsi, '/qn', '/norestart', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', "APPLICATIONFOLDER=$msiTarget")
   $activeMsi = $newMsi
   Check-Installation $msiTarget $nextVersion
-  $results.Add('MSI subsequent version upgrade preserves workspace and images')
+  $results.Add('MSI subsequent version upgrade preserves workspace')
   Run-Installer 'msiexec.exe' @('/x', $activeMsi, '/qn', '/norestart')
   $activeMsi = $null
   Check-Data
   if (@(Installed-ShellGrid).Count) { throw 'MSI uninstall left an installed product entry' }
   if (Test-Path -LiteralPath (Join-Path $msiTarget 'ShellGrid.exe')) { throw 'MSI uninstall left the application installed' }
-  $results.Add('MSI uninstall preserves workspace and images')
+  $results.Add('MSI uninstall preserves workspace')
   $report = @{ date = [DateTime]::UtcNow.ToString('o'); fromVersion = $version; toVersion = $nextVersion; passed = $results.ToArray() }
   $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $repoRoot 'artifacts\installer-verification.json') -Encoding utf8
   Write-Output 'PASS: EXE/MSI install, upgrade, uninstall and business data retention'
@@ -125,7 +118,5 @@ finally {
   if ($activeMsi) { Run-Installer 'msiexec.exe' @('/x', $activeMsi, '/qn', '/norestart') }
   # The seeded business files are deleted only when still identical to our bytes.
   if ($createdWorkspace -and (Test-Path -LiteralPath $workspacePath) -and (Get-FileHash -LiteralPath $workspacePath).Hash -eq $workspaceHash) { Remove-Item -LiteralPath $workspacePath }
-  if ((Test-Path -LiteralPath $imagePath) -and (Get-FileHash -LiteralPath $imagePath).Hash -eq $imageHash) { Remove-Item -LiteralPath $imagePath }
-  if ($createdImagesDirectory -and -not @(Get-ChildItem -LiteralPath $imagesDirectory -Force).Count) { Remove-Item -LiteralPath $imagesDirectory }
   if ($createdDataDirectory -and -not @(Get-ChildItem -LiteralPath $dataDirectory -Force).Count) { Remove-Item -LiteralPath $dataDirectory }
 }
