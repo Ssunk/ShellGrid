@@ -1,0 +1,1877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShellGrid UI 优化效果演示 Demo</title>
+  <style>
+    /* ==========================================================================
+       Design System & CSS Variables
+       现代黑曜石灵动科技风 (Modern Obsidian & Precision Tech)
+       ========================================================================== */
+    :root {
+      /* Base Colors - 深色多层次背景系统 */
+      --bg-root: #090d12;
+      --bg-canvas: #0c1017;
+      --bg-surface: #121822;
+      --bg-surface-raised: #18202d;
+      --bg-surface-elevated: #1e2838;
+      --bg-glass: rgba(14, 20, 29, 0.82);
+
+      /* Border System - 精细半透明微边框 */
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.12);
+      --border-strong: rgba(255, 255, 255, 0.20);
+      --border-glass: rgba(255, 255, 255, 0.08);
+
+      /* Typography - 现代文字阶梯 */
+      --text-main: #edf2f7;
+      --text-secondary: #9aa8b9;
+      --text-muted: #5e6f82;
+      --text-dim: #435163;
+      --font-sans: "Segoe UI Variable Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "Courier New", monospace;
+
+      /* Accent Palette (默认 Emerald 翡翠青绿) */
+      --accent: #10b981;
+      --accent-hover: #059669;
+      --accent-subtle: rgba(16, 185, 129, 0.12);
+      --accent-glow: rgba(16, 185, 129, 0.28);
+      --accent-border: rgba(16, 185, 129, 0.45);
+      --accent-text: #34d399;
+
+      /* Semantic Status Colors */
+      --color-success: #10b981;
+      --color-warning: #f59e0b;
+      --color-warning-subtle: rgba(245, 158, 11, 0.14);
+      --color-danger: #f43f5e;
+      --color-danger-subtle: rgba(244, 63, 94, 0.14);
+      --color-info: #38bdf8;
+      --color-info-subtle: rgba(56, 189, 248, 0.14);
+
+      /* Shadows & Radii */
+      --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+      --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+      --radius-sm: 5px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-pill: 9999px;
+
+      /* Micro Transitions */
+      --transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Accent Themes (可在演示栏实时切换) */
+    body[data-theme="cyan"] {
+      --accent: #0ea5e9;
+      --accent-hover: #0284c7;
+      --accent-subtle: rgba(14, 165, 233, 0.14);
+      --accent-glow: rgba(14, 165, 233, 0.35);
+      --accent-border: rgba(14, 165, 233, 0.5);
+      --accent-text: #38bdf8;
+    }
+    body[data-theme="violet"] {
+      --accent: #8b5cf6;
+      --accent-hover: #7c3aed;
+      --accent-subtle: rgba(139, 92, 246, 0.15);
+      --accent-glow: rgba(139, 92, 246, 0.35);
+      --accent-border: rgba(139, 92, 246, 0.5);
+      --accent-text: #a78bfa;
+    }
+    body[data-theme="amber"] {
+      --accent: #f59e0b;
+      --accent-hover: #d97706;
+      --accent-subtle: rgba(245, 158, 11, 0.15);
+      --accent-glow: rgba(245, 158, 11, 0.35);
+      --accent-border: rgba(245, 158, 11, 0.5);
+      --accent-text: #fbbf24;
+    }
+
+    /* Reset */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      color: var(--text-main);
+      background: var(--bg-root);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+    }
+    button, input, select, textarea {
+      font: inherit;
+      color: inherit;
+      border: none;
+      background: transparent;
+      outline: none;
+    }
+
+    /* ==========================================================================
+       Top Navigation Bar (顶部高透磨砂导航栏)
+       ========================================================================== */
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+      background: radial-gradient(circle at 50% -20%, rgba(16, 185, 129, 0.05) 0%, transparent 60%), var(--bg-root);
+    }
+
+    .topbar {
+      height: 48px;
+      flex: 0 0 48px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-subtle);
+      position: relative;
+      z-index: 50;
+      gap: 12px;
+    }
+
+    /* Brand Logo & Workspace Pill */
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, var(--accent) 0%, #064e3b 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 14px var(--accent-glow), inset 0 1px 1px rgba(255,255,255,0.4);
+      color: #fff;
+    }
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+    }
+    .brand-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      background: linear-gradient(180deg, #ffffff 30%, #c4d2e0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .workspace-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill);
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: var(--transition);
+      max-width: 220px;
+    }
+    .workspace-pill:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-medium);
+      color: var(--text-main);
+    }
+    .workspace-pill svg {
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .workspace-pill span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-separator {
+      width: 1px;
+      height: 18px;
+      background: var(--border-subtle);
+      margin: 0 4px;
+    }
+
+    /* Action Toolbar Buttons */
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .toolbar-button {
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 11px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+    }
+    .toolbar-button svg {
+      opacity: 0.8;
+      transition: var(--transition);
+    }
+    .toolbar-button:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-medium);
+      color: var(--text-main);
+    }
+    .toolbar-button:hover svg {
+      opacity: 1;
+      color: var(--accent);
+    }
+    .toolbar-button.active {
+      background: var(--accent-subtle);
+      border-color: var(--accent-border);
+      color: var(--accent-text);
+    }
+    .toolbar-button.active svg {
+      color: var(--accent-text);
+      opacity: 1;
+    }
+    .toolbar-button kbd {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      padding: 2px 4px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--text-muted);
+      margin-left: 2px;
+      line-height: 1;
+    }
+
+    /* Right Status Utilities */
+    .topbar-spacer {
+      flex: 1;
+    }
+    .topbar-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      padding: 3px 9px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill);
+      font-family: var(--font-mono);
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .status-dot.dirty {
+      background: var(--color-warning);
+      box-shadow: 0 0 8px var(--color-warning);
+    }
+
+    .icon-button {
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+    }
+    .icon-button:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-medium);
+      color: var(--text-main);
+    }
+    .icon-button.active {
+      background: var(--accent-subtle);
+      border-color: var(--accent-border);
+      color: var(--accent-text);
+    }
+    .icon-button .badge-dot {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 5px;
+      height: 5px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    /* ==========================================================================
+       Workbench Main Area
+       ========================================================================== */
+    .workbench {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      position: relative;
+      background: var(--bg-canvas);
+    }
+
+    /* ==========================================================================
+       Git Source Control Panel (左侧侧边栏)
+       ========================================================================== */
+    .git-panel {
+      width: 340px;
+      flex: 0 0 340px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      z-index: 20;
+      transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .git-header {
+      height: 44px;
+      flex: 0 0 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .git-header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      font-weight: 650;
+      color: var(--text-main);
+    }
+    .git-header-title svg {
+      color: var(--accent);
+    }
+    .git-header-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    /* Branch & Sync Bar */
+    .git-branch-bar {
+      height: 38px;
+      flex: 0 0 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      background: rgba(0, 0, 0, 0.25);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11.5px;
+    }
+    .branch-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .branch-selector:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-medium);
+    }
+    .sync-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .sync-stat {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .sync-stat.up { color: var(--accent-text); }
+    .sync-stat.down { color: var(--color-info); }
+
+    /* Commit Box */
+    .git-commit-box {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.01);
+    }
+    .commit-textarea {
+      width: 100%;
+      height: 72px;
+      padding: 8px 10px;
+      background: var(--bg-root);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-main);
+      font-size: 12px;
+      resize: none;
+      transition: var(--transition);
+      line-height: 1.4;
+    }
+    .commit-textarea:focus {
+      border-color: var(--accent-border);
+      box-shadow: 0 0 0 3px var(--accent-subtle);
+    }
+    .commit-textarea::placeholder {
+      color: var(--text-dim);
+    }
+    .commit-options {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .commit-flags {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .commit-flags label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+    .commit-flags input[type="checkbox"] {
+      accent-color: var(--accent);
+    }
+    .commit-button {
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 14px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+      color: #fff;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      box-shadow: 0 2px 8px var(--accent-glow);
+      transition: var(--transition);
+    }
+    .commit-button:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    /* Changes List */
+    .git-file-list {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 120px;
+    }
+    .git-group-header {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .git-group-header .count {
+      padding: 1px 6px;
+      border-radius: var(--radius-pill);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+    .git-file-item {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px 0 14px;
+      gap: 8px;
+      font-size: 12px;
+      border-left: 2px solid transparent;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+    }
+    .git-file-item:hover {
+      background: rgba(255, 255, 255, 0.035);
+    }
+    .git-file-item.selected {
+      background: var(--accent-subtle);
+      border-left-color: var(--accent);
+    }
+    .git-file-name {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+    }
+    .git-file-path {
+      color: var(--text-dim);
+      font-size: 10px;
+      margin-left: 6px;
+    }
+    .status-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 4px;
+    }
+    .status-tag.modified {
+      color: var(--color-warning);
+      background: var(--color-warning-subtle);
+    }
+    .status-tag.added {
+      color: var(--color-success);
+      background: var(--accent-subtle);
+    }
+    .status-tag.untracked {
+      color: var(--color-info);
+      background: var(--color-info-subtle);
+    }
+
+    /* Diff View Section */
+    .git-diff-container {
+      height: 220px;
+      flex: 0 0 220px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      background: #090c10;
+    }
+    .diff-header {
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+    }
+    .diff-code {
+      flex: 1;
+      overflow: auto;
+      padding: 8px 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .diff-line {
+      display: flex;
+      padding: 0 10px;
+      white-space: pre;
+    }
+    .diff-line.add {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+    }
+    .diff-line.del {
+      background: rgba(244, 63, 94, 0.18);
+      color: #fda4af;
+    }
+    .diff-line.meta {
+      color: #64748b;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Resizer between panels */
+    .panel-resizer {
+      width: 4px;
+      cursor: col-resize;
+      background: transparent;
+      transition: background 0.2s;
+      position: relative;
+      z-index: 10;
+    }
+    .panel-resizer:hover, .panel-resizer:active {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    /* ==========================================================================
+       Terminal Workspace & Split Grid (终端网格工作区)
+       ========================================================================== */
+    .workspace-area {
+      flex: 1;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      padding: 10px;
+      gap: 10px;
+      background: var(--bg-canvas);
+    }
+
+    /* Split Root (模拟递归分割系统) */
+    .split-container {
+      flex: 1;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      gap: 10px;
+      width: 100%;
+      height: 100%;
+    }
+    .split-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    /* Modern Terminal Pane Card */
+    .terminal-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+      position: relative;
+    }
+    .terminal-pane:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    /* Active Pane (高亮焦点窗格) */
+    .terminal-pane.active {
+      border-color: var(--accent-border);
+      box-shadow: 0 0 0 1px var(--accent-border), 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 20px var(--accent-subtle);
+    }
+    .terminal-pane.active::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      box-shadow: 0 0 10px var(--accent);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* Terminal Pane Header */
+    .pane-header {
+      height: 36px;
+      flex: 0 0 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px 0 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .terminal-pane.active .pane-header {
+      background: linear-gradient(90deg, var(--accent-subtle) 0%, rgba(255, 255, 255, 0.015) 100%);
+    }
+
+    .pane-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .pane-shell-icon {
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      color: var(--accent-text);
+      opacity: 0.9;
+    }
+    .pane-title-text {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: var(--font-mono);
+    }
+    .pane-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill);
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .pane-badge.running {
+      color: var(--color-success);
+      background: var(--accent-subtle);
+      border-color: rgba(16, 185, 129, 0.25);
+    }
+    .pane-badge.running .pulse-dot {
+      width: 5px;
+      height: 5px;
+      background: var(--color-success);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--color-success);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .pane-actions {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .pane-btn {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .pane-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+    .pane-btn.close:hover {
+      background: var(--color-danger-subtle);
+      color: var(--color-danger);
+    }
+
+    /* Terminal Body Canvas */
+    .terminal-body {
+      flex: 1;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: #d1d9e2;
+      overflow-y: auto;
+      background: var(--bg-root);
+    }
+    .cli-line {
+      margin-bottom: 2px;
+      word-break: break-all;
+    }
+    .cli-prompt {
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    .cli-path {
+      color: #38bdf8;
+    }
+    .cli-cmd {
+      color: #fff;
+      font-weight: 500;
+    }
+    .cli-dim { color: #526071; }
+    .cli-green { color: #34d399; }
+    .cli-yellow { color: #fbbf24; }
+    .cli-cyan { color: #38bdf8; }
+    .cli-magenta { color: #e879f9; }
+    .cli-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 15px;
+      background: var(--accent);
+      vertical-align: middle;
+      animation: blink 1.1s infinite;
+      box-shadow: 0 0 6px var(--accent);
+    }
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    /* Terminal Split Divider */
+    .split-divider {
+      width: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: col-resize;
+      position: relative;
+    }
+    .split-divider::after {
+      content: "";
+      width: 2px;
+      height: 100%;
+      background: var(--border-subtle);
+      border-radius: 2px;
+      transition: var(--transition);
+    }
+    .split-divider:hover::after, .split-divider:active::after {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    /* ==========================================================================
+       Popovers & Floating Overlays (搜索、代理、运行环境)
+       ========================================================================== */
+    .popover-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      display: none;
+    }
+    .popover-backdrop.show {
+      display: block;
+    }
+
+    /* Floating Search HUD (Ctrl+Shift+F) */
+    .search-hud {
+      position: absolute;
+      top: 58px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg), 0 0 24px rgba(0, 0, 0, 0.5);
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 110;
+      opacity: 0;
+      pointer-events: none;
+      transition: var(--transition);
+    }
+    .search-hud.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+    .search-input {
+      width: 280px;
+      height: 28px;
+      padding: 0 8px;
+      background: var(--bg-root);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text-main);
+      font-family: var(--font-mono);
+    }
+    .search-input:focus {
+      border-color: var(--accent-border);
+    }
+    .search-count {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 0 4px;
+    }
+
+    /* Floating Environment Popover */
+    .env-popover {
+      position: absolute;
+      top: 54px;
+      right: 14px;
+      width: 320px;
+      background: var(--bg-surface-raised);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 16px;
+      z-index: 110;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      animation: popIn 0.16s ease-out;
+    }
+    .env-popover.show {
+      display: flex;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .popover-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 10px;
+    }
+    .env-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .env-item .tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--accent-subtle);
+      color: var(--accent-text);
+      font-weight: 500;
+    }
+    .env-item code {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      max-width: 180px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Floating Proxy Popover */
+    .proxy-popover {
+      position: absolute;
+      top: 54px;
+      right: 50px;
+      width: 340px;
+      background: var(--bg-surface-raised);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 16px;
+      z-index: 110;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      animation: popIn 0.16s ease-out;
+    }
+    .proxy-popover.show {
+      display: flex;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      color: var(--text-main);
+    }
+    /* Modern Switch Control */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 20px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.12);
+      transition: .2s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      transition: .2s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    input:checked + .slider:before {
+      transform: translateX(18px);
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .form-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .form-input {
+      height: 30px;
+      padding: 0 10px;
+      background: var(--bg-root);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .form-input:focus {
+      border-color: var(--accent-border);
+    }
+
+    /* ==========================================================================
+       Interactive Demo Control Dock (底部演示悬浮控制器)
+       ========================================================================== */
+    .demo-dock {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18, 24, 34, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-pill);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(16, 185, 129, 0.15);
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      z-index: 200;
+      animation: floatUp 0.4s ease-out;
+    }
+    @keyframes floatUp {
+      from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+      to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+    .dock-title {
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent-text);
+      white-space: nowrap;
+    }
+    .dock-sep {
+      width: 1px;
+      height: 16px;
+      background: var(--border-medium);
+    }
+    .dock-btn {
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill);
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .dock-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .dock-btn.active {
+      background: var(--accent-subtle);
+      border-color: var(--accent-border);
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    .color-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    /* Comparison Modal */
+    .compare-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(10px);
+      z-index: 300;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+    }
+    .compare-modal.show {
+      display: flex;
+    }
+    .compare-card {
+      width: 900px;
+      max-width: 95vw;
+      background: var(--bg-surface-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .compare-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+    }
+    .compare-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .compare-table th, .compare-table td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .compare-table th {
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .tag-old {
+      color: #94a3b8;
+      background: rgba(148, 163, 184, 0.1);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .tag-new {
+      color: var(--accent-text);
+      background: var(--accent-subtle);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body data-theme="emerald">
+
+  <div class="app-shell">
+    <!-- ================= TOPBAR ================= -->
+    <header class="topbar">
+      <!-- Brand & Project Identifier -->
+      <div class="brand">
+        <div class="brand-logo">
+          <!-- Terminal Grid Logo SVG -->
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="4" />
+            <path d="m8 9 3 3-3 3" />
+            <path d="M13 15h3" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">ShellGrid</span>
+        </div>
+      </div>
+
+      <!-- Current Workspace Root Path Pill -->
+      <div class="workspace-pill" title="当前工作区：D:\workspace\porjects\ShellGrid">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
+        </svg>
+        <span>ShellGrid</span>
+      </div>
+
+      <div class="topbar-separator"></div>
+
+      <!-- Primary Action Buttons with Tooltips & Shortcuts -->
+      <div class="toolbar-group">
+        <button class="toolbar-button" id="btn-open-folder" title="打开新工作区目录">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>
+          </svg>
+          打开文件夹
+        </button>
+
+        <button class="toolbar-button active" id="btn-toggle-git" title="切换 Git 源码管理侧边栏">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="6" x2="6" y1="3" y2="15"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          源码管理
+          <kbd>3</kbd>
+        </button>
+
+        <button class="toolbar-button" id="btn-split-h" title="水平分屏 (左右并排)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="18" height="18" x="3" y="3" rx="2"/>
+            <path d="M12 3v18"/>
+          </svg>
+          左右分割
+          <kbd>Ctrl+Shift+H</kbd>
+        </button>
+
+        <button class="toolbar-button" id="btn-split-v" title="垂直分屏 (上下堆叠)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="18" height="18" x="3" y="3" rx="2"/>
+            <path d="M3 12h18"/>
+          </svg>
+          上下分割
+          <kbd>Ctrl+Shift+V</kbd>
+        </button>
+
+        <button class="toolbar-button" id="btn-save-workspace" title="持久化保存窗格与会话布局">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/>
+            <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/>
+            <path d="M7 3v4a1 1 0 0 0 1 1h7"/>
+          </svg>
+          保存
+        </button>
+      </div>
+
+      <div class="topbar-spacer"></div>
+
+      <!-- Right Utility Indicators -->
+      <div class="topbar-status">
+        <div class="status-badge" title="当前窗格数量与上限">
+          <span style="color: var(--text-muted);">窗格</span>
+          <span style="color: var(--text-main); font-weight: 600;">2 / 16</span>
+        </div>
+
+        <div class="status-badge" title="工作区持久化状态">
+          <span class="status-dot"></span>
+          <span>已保存</span>
+        </div>
+
+        <div class="topbar-separator"></div>
+
+        <button class="icon-button" id="btn-search" title="搜索终端输出 (Ctrl+Shift+F)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+          </svg>
+        </button>
+
+        <button class="icon-button active" id="btn-proxy" title="网络代理已启用：127.0.0.1:7890">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+            <path d="M2 12h20"/>
+          </svg>
+          <span class="badge-dot"></span>
+        </button>
+
+        <button class="icon-button" id="btn-env" title="查看运行环境与更新信息">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4"/>
+            <path d="M12 8h.01"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ================= FLOATING SEARCH HUD ================= -->
+    <div class="search-hud" id="search-hud">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent);">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input class="search-input" id="search-input" type="text" placeholder="搜索当前终端内容 (Enter 下一个，Esc 关闭)" value="Vite" />
+      <span class="search-count">2 / 4</span>
+      <button class="pane-btn" title="上一个"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg></button>
+      <button class="pane-btn" title="下一个"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button class="pane-btn close" id="btn-close-search" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+
+    <!-- ================= FLOATING PROXY POPOVER ================= -->
+    <div class="proxy-popover" id="proxy-popover">
+      <div class="popover-heading">
+        <span>网络代理配置</span>
+        <span class="status-dot"></span>
+      </div>
+      <div class="toggle-row">
+        <span>为新建终端注入代理环境</span>
+        <label class="switch">
+          <input type="checkbox" checked id="proxy-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="form-label">代理服务器地址 (HTTP / SOCKS5)</label>
+        <input class="form-input" type="text" value="http://127.0.0.1:7890" spellcheck="false" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">例外规则 (NO_PROXY，可选)</label>
+        <input class="form-input" type="text" value="localhost,127.0.0.1" spellcheck="false" />
+      </div>
+      <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+        通过 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 注入会话，支持 Clash / v2ray。
+      </p>
+    </div>
+
+    <!-- ================= FLOATING ENV POPOVER ================= -->
+    <div class="env-popover" id="env-popover">
+      <div class="popover-heading">
+        <span>ShellGrid 运行状态</span>
+        <span class="tag">v0.3.1</span>
+      </div>
+      <div class="env-item">
+        <span>Windows 宿主</span>
+        <span class="tag">Windows 11 (26100)</span>
+      </div>
+      <div class="env-item">
+        <span>Electron 运行时</span>
+        <span class="tag">42.8.1 (Chromium 124)</span>
+      </div>
+      <div class="env-item">
+        <span>PowerShell 引擎</span>
+        <span class="tag">pwsh 7.4.2</span>
+      </div>
+      <div class="env-item">
+        <span>Git 版本控制</span>
+        <span class="tag">git 2.45.0</span>
+      </div>
+      <div class="env-item">
+        <span>ConPTY 会话</span>
+        <span class="tag">node-pty 1.2.0</span>
+      </div>
+      <button class="dock-btn" style="justify-content: center; width: 100%; margin-top: 6px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        检查更新 (已是最新版)
+      </button>
+    </div>
+
+    <!-- ================= WORKBENCH MAIN ================= -->
+    <main class="workbench">
+      <!-- LEFT: Git Source Control Sidebar -->
+      <aside class="git-panel" id="git-panel">
+        <!-- Git Header -->
+        <div class="git-header">
+          <div class="git-header-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+            </svg>
+            <span>源代码管理</span>
+          </div>
+          <div class="git-header-actions">
+            <button class="pane-btn" title="刷新状态"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button class="pane-btn close" id="btn-close-git" title="收起面板"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+          </div>
+        </div>
+
+        <!-- Branch Selector & Sync Bar -->
+        <div class="git-branch-bar">
+          <div class="branch-selector">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent);">
+              <line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+            </svg>
+            <span>main</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+          <div class="sync-status">
+            <div class="sync-stat up" title="待推送 1 个提交">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+              <span>1</span>
+            </div>
+            <div class="sync-stat down" title="待拉取 0 个提交">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 12-7 7-7-7"/><path d="M12 5v14"/></svg>
+              <span>0</span>
+            </div>
+            <button class="pane-btn" title="同步 (Fetch & Push)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></button>
+          </div>
+        </div>
+
+        <!-- Commit Message Box -->
+        <div class="git-commit-box">
+          <textarea class="commit-textarea" placeholder="输入提交信息 (Ctrl+Enter 快速提交)...">feat: 优化前端现代化 UI 界面风格与交互体验</textarea>
+          <div class="commit-options">
+            <div class="commit-flags">
+              <label><input type="checkbox"> Amend</label>
+              <label><input type="checkbox"> Sign-off</label>
+            </div>
+            <button class="commit-button">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              提交
+            </button>
+          </div>
+        </div>
+
+        <!-- File Tree Lists -->
+        <div class="git-file-list">
+          <!-- Staged Group -->
+          <div class="git-group-header">
+            <span>暂存的更改</span>
+            <span class="count">2</span>
+          </div>
+          <div class="git-file-item selected">
+            <span class="status-tag modified">M</span>
+            <span class="git-file-name">styles.css<span class="git-file-path">src/</span></span>
+            <button class="pane-btn" title="取消暂存"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" x2="19" y1="12" y2="12"/></svg></button>
+          </div>
+          <div class="git-file-item">
+            <span class="status-tag modified">M</span>
+            <span class="git-file-name">App.svelte<span class="git-file-path">src/</span></span>
+            <button class="pane-btn" title="取消暂存"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" x2="19" y1="12" y2="12"/></svg></button>
+          </div>
+
+          <!-- Working Tree Changes -->
+          <div class="git-group-header" style="margin-top: 8px;">
+            <span>更改 (未暂存)</span>
+            <span class="count">1</span>
+          </div>
+          <div class="git-file-item">
+            <span class="status-tag untracked">U</span>
+            <span class="git-file-name">demo.html<span class="git-file-path">./</span></span>
+            <button class="pane-btn" title="暂存"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg></button>
+          </div>
+        </div>
+
+        <!-- Integrated Diff View Preview -->
+        <div class="git-diff-container">
+          <div class="diff-header">
+            <span>Diff: src/styles.css</span>
+            <span style="color: var(--accent-text);">+42 -18</span>
+          </div>
+          <div class="diff-code">
+            <div class="diff-line meta">@@ -14,8 +14,10 @@ .topbar {</div>
+            <div class="diff-line del">-  background: #15191d;</div>
+            <div class="diff-line del">-  border-bottom: 1px solid #272d32;</div>
+            <div class="diff-line add">+  background: var(--bg-glass);</div>
+            <div class="diff-line add">+  backdrop-filter: blur(20px);</div>
+            <div class="diff-line add">+  border-bottom: 1px solid var(--border-subtle);</div>
+            <div class="diff-line meta">@@ -143,6 +145,12 @@ .terminal-pane {</div>
+            <div class="diff-line del">-  border-radius: 4px;</div>
+            <div class="diff-line add">+  border-radius: var(--radius-lg);</div>
+            <div class="diff-line add">+  box-shadow: var(--shadow-sm);</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Panel Resizer Divider -->
+      <div class="panel-resizer" id="git-resizer"></div>
+
+      <!-- CENTER: Split Terminal Workspace Area -->
+      <div class="workspace-area">
+        <div class="split-container">
+          <!-- Pane 1: Primary Active Terminal (Left Column, 55%) -->
+          <div class="terminal-pane active" id="pane-1" style="flex: 55;">
+            <div class="pane-header">
+              <div class="pane-info">
+                <div class="pane-shell-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>
+                  </svg>
+                </div>
+                <span class="pane-title-text" title="pwsh 7.4.2 - ShellGrid">pwsh · ShellGrid 主控服务</span>
+                <span class="pane-badge running">
+                  <span class="pulse-dot"></span>
+                  PID 18420 · 运行中
+                </span>
+              </div>
+              <div class="pane-actions">
+                <button class="pane-btn" title="重启会话"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <button class="pane-btn" title="左右分割 (Ctrl+Shift+H)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg></button>
+                <button class="pane-btn" title="上下分割 (Ctrl+Shift+V)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/></svg></button>
+                <button class="pane-btn close" title="关闭窗格 (Ctrl+Shift+W)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+              </div>
+            </div>
+
+            <!-- Terminal Output Emulation -->
+            <div class="terminal-body">
+              <div class="cli-line cli-dim">PowerShell 7.4.2 [ConPTY Windows x64 host]</div>
+              <div class="cli-line cli-dim">加载本地配置文件 C:\Users\sun\Documents\PowerShell\Microsoft.PowerShell_profile.ps1</div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line">
+                <span class="cli-prompt">PS </span>
+                <span class="cli-path">D:\workspace\porjects\ShellGrid</span>
+                <span class="cli-dim">&gt; </span>
+                <span class="cli-cmd">npm run dev</span>
+              </div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line"><span class="cli-cyan">&gt; shellgrid@0.3.1 dev</span></div>
+              <div class="cli-line"><span class="cli-cyan">&gt; vite</span></div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line"><span class="cli-green">  VITE v6.2.0</span>  <span class="cli-dim">ready in 248 ms</span></div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line">  <span class="cli-green">➜</span>  <span class="cli-dim">Local:</span>   <span class="cli-cyan">http://localhost:5173/</span></div>
+              <div class="cli-line">  <span class="cli-green">➜</span>  <span class="cli-dim">Network:</span> <span class="cli-dim">use --host to expose</span></div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line"><span class="cli-green">[Electron]</span> 启动主进程 (Electron 42.8.1)...</div>
+              <div class="cli-line"><span class="cli-green">[PTY Host]</span> 单实例 ConPTY 服务已就绪，PID 20492</div>
+              <div class="cli-line"><span class="cli-green">[MessagePort]</span> 客户端连接成功，握手耗时 12ms</div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line">
+                <span class="cli-prompt">PS </span>
+                <span class="cli-path">D:\workspace\porjects\ShellGrid</span>
+                <span class="cli-dim">&gt; </span>
+                <span class="cli-cmd">git status -s</span>
+              </div>
+              <div class="cli-line"><span class="cli-yellow"> M</span> src/styles.css</div>
+              <div class="cli-line"><span class="cli-yellow"> M</span> src/App.svelte</div>
+              <div class="cli-line"><span class="cli-green">??</span> demo.html</div>
+              <div class="cli-line">&nbsp;</div>
+              <div class="cli-line">
+                <span class="cli-prompt">PS </span>
+                <span class="cli-path">D:\workspace\porjects\ShellGrid</span>
+                <span class="cli-dim">&gt; </span>
+                <span class="cli-cursor"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Splitter Column (Between Pane 1 & Pane 2) -->
+          <div class="split-divider"></div>
+
+          <!-- Right Column: Stacked Panes (45%) -->
+          <div class="split-col" style="flex: 45;">
+            <!-- Pane 2: Top Right (Git / Log Pane) -->
+            <div class="terminal-pane" id="pane-2" style="flex: 1;">
+              <div class="pane-header">
+                <div class="pane-info">
+                  <div class="pane-shell-icon" style="color: var(--color-info);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/><path d="m10 15 5-3-5-3v6Z"/>
+                    </svg>
+                  </div>
+                  <span class="pane-title-text">pwsh · npm run check</span>
+                  <span class="pane-badge" style="color: var(--color-info);">
+                    PID 21084 · 已完成
+                  </span>
+                </div>
+                <div class="pane-actions">
+                  <button class="pane-btn" title="重启"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                  <button class="pane-btn close" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+                </div>
+              </div>
+              <div class="terminal-body" style="font-size: 11.5px;">
+                <div class="cli-line"><span class="cli-dim">&gt; svelte-check --tsconfig ./tsconfig.json</span></div>
+                <div class="cli-line">&nbsp;</div>
+                <div class="cli-line">正在检查 25 个 TypeScript / Svelte 源文件...</div>
+                <div class="cli-line"><span class="cli-green">✔ 0 处类型错误</span></div>
+                <div class="cli-line"><span class="cli-green">✔ 0 处警告</span></div>
+                <div class="cli-line"><span class="cli-green">✔ 全部代码质量检查通过 (耗时 1.84s)</span></div>
+                <div class="cli-line">&nbsp;</div>
+                <div class="cli-line">
+                  <span class="cli-prompt">PS </span>
+                  <span class="cli-path">D:\workspace\porjects\ShellGrid</span>
+                  <span class="cli-dim">&gt; </span>
+                  <span class="cli-cursor"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pane 3: Bottom Right (System Monitor or Tests) -->
+            <div class="terminal-pane" id="pane-3" style="flex: 1;">
+              <div class="pane-header">
+                <div class="pane-info">
+                  <div class="pane-shell-icon" style="color: var(--color-warning);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                  </div>
+                  <span class="pane-title-text">pwsh · npm test:unit</span>
+                  <span class="pane-badge running">
+                    <span class="pulse-dot"></span>
+                    PID 22916 · 监听中
+                  </span>
+                </div>
+                <div class="pane-actions">
+                  <button class="pane-btn" title="重启"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                  <button class="pane-btn close" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+                </div>
+              </div>
+              <div class="terminal-body" style="font-size: 11.5px;">
+                <div class="cli-line"><span class="cli-cyan">PASS</span> src/lib/layout.test.ts (6 tests)</div>
+                <div class="cli-line"><span class="cli-cyan">PASS</span> src/lib/terminalClient.test.ts (8 tests)</div>
+                <div class="cli-line"><span class="cli-cyan">PASS</span> src/lib/proxy.test.ts (4 tests)</div>
+                <div class="cli-line"><span class="cli-green">Test Suites: 3 passed, 3 total</span></div>
+                <div class="cli-line"><span class="cli-green">Tests:       18 passed, 18 total</span></div>
+                <div class="cli-line"><span class="cli-dim">Snapshots:   0 total</span></div>
+                <div class="cli-line"><span class="cli-dim">Time:        0.982 s</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= POPUP BACKDROP ================= -->
+  <div class="popover-backdrop" id="popover-backdrop"></div>
+
+  <!-- ================= INTERACTIVE DEMO DOCK ================= -->
+  <div class="demo-dock">
+    <div class="dock-title">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/>
+      </svg>
+      <span>UI 优化演示控制台</span>
+    </div>
+
+    <div class="dock-sep"></div>
+
+    <!-- Theme Accents -->
+    <button class="dock-btn active" data-theme-btn="emerald" onclick="switchTheme('emerald')">
+      <span class="color-swatch" style="background: #10b981;"></span>
+      翡翠青绿 (默认)
+    </button>
+    <button class="dock-btn" data-theme-btn="cyan" onclick="switchTheme('cyan')">
+      <span class="color-swatch" style="background: #0ea5e9;"></span>
+      极客冰蓝
+    </button>
+    <button class="dock-btn" data-theme-btn="violet" onclick="switchTheme('violet')">
+      <span class="color-swatch" style="background: #8b5cf6;"></span>
+      霓虹紫珀
+    </button>
+    <button class="dock-btn" data-theme-btn="amber" onclick="switchTheme('amber')">
+      <span class="color-swatch" style="background: #f59e0b;"></span>
+      琥珀暖金
+    </button>
+
+    <div class="dock-sep"></div>
+
+    <!-- Compare Old vs New Modal Trigger -->
+    <button class="dock-btn" onclick="openCompareModal()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8"/><path d="M9 7l3 3 3-3"/></svg>
+      优化亮点对比
+    </button>
+  </div>
+
+  <!-- ================= COMPARISON HIGHLIGHTS MODAL ================= -->
+  <div class="compare-modal" id="compare-modal" onclick="if(event.target === this) closeCompareModal()">
+    <div class="compare-card">
+      <div class="compare-header">
+        <div class="compare-title">✨ ShellGrid 前端 UI 优化设计方案对比</div>
+        <button class="pane-btn close" onclick="closeCompareModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>界面模块</th>
+            <th>原版效果 (旧)</th>
+            <th>优化后效果 (新)</th>
+            <th>设计提升价值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>整体色彩与材质</strong></td>
+            <td><span class="tag-old">单调灰黑 (#0c0f11)</span>，扁平无质感，缺乏呼吸感与层次感</td>
+            <td><span class="tag-new">黑曜石多阶深色 + 径向光晕 + 高透磨砂玻璃 (Glassmorphism)</span></td>
+            <td>视觉更加沉浸高级，媲美 Warp、Ghostty、Linear 桌面端质感</td>
+          </tr>
+          <tr>
+            <td><strong>顶部导航栏</strong></td>
+            <td>按钮密挤生硬，无快捷键提示，状态文字简陋</td>
+            <td><span class="tag-new">胶囊化工作区标识 + 快捷键徽章 (&lt;kbd&gt;) + 发光呼吸状态灯</span></td>
+            <td>操作更明确直观，一目了然快捷键与工作区路径，空间更通透</td>
+          </tr>
+          <tr>
+            <td><strong>终端窗格 (Panes)</strong></td>
+            <td>简陋的 1px 单色灰框，活动窗格辨识度弱，头部文字拥挤</td>
+            <td><span class="tag-new">灵动呼吸光带 + 晶格圆角 + 会话 PID 状态胶囊 + 独立快捷按钮</span></td>
+            <td>聚焦窗格一目了然，多窗格工作时注意力聚焦更精准，科技感大幅提升</td>
+          </tr>
+          <tr>
+            <td><strong>Git 源码管理侧栏</strong></td>
+            <td>原版下拉列表与文本框样式粗糙，无提交快捷键与差异高亮</td>
+            <td><span class="tag-new">现代抽屉面板 + 状态彩标 (M/A/U) + 优雅 Diff 代码段 + 渐变提交键</span></td>
+            <td>代码改动与暂存状态清晰明了，提交操作更为顺畅高效</td>
+          </tr>
+          <tr>
+            <td><strong>悬浮浮窗 (搜索/代理)</strong></td>
+            <td>生硬弹框，直角灰底，缺少微动效与输入聚焦反馈</td>
+            <td><span class="tag-new">悬浮胶囊 HUD + 丝滑 iOS 质感滑动开关 + 弹入淡出微交互</span></td>
+            <td>降低视觉打扰，呼之即来，挥之即去，操作流畅优雅</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+        <button class="commit-button" onclick="closeCompareModal()">我知道了，返回效果预览</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= INTERACTIVE SCRIPT ================= -->
+  <script>
+    // 1. 切换主题强调色
+    window.switchTheme = function(theme) {
+      document.body.setAttribute('data-theme', theme);
+      document.querySelectorAll('[data-theme-btn]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-theme-btn') === theme);
+      });
+    };
+
+    // 2. 窗格点击聚焦切换
+    const panes = document.querySelectorAll('.terminal-pane');
+    panes.forEach(pane => {
+      pane.addEventListener('pointerdown', () => {
+        panes.forEach(p => p.classList.remove('active'));
+        pane.classList.add('active');
+      });
+    });
+
+    // 3. Git 面板显示/收起
+    const gitPanel = document.getElementById('git-panel');
+    const gitResizer = document.getElementById('git-resizer');
+    const btnToggleGit = document.getElementById('btn-toggle-git');
+    const btnCloseGit = document.getElementById('btn-close-git');
+
+    window.toggleGitPanel = function() {
+      const isVisible = gitPanel.style.display !== 'none';
+      if (isVisible) {
+        gitPanel.style.display = 'none';
+        gitResizer.style.display = 'none';
+        btnToggleGit.classList.remove('active');
+      } else {
+        gitPanel.style.display = 'flex';
+        gitResizer.style.display = 'block';
+        btnToggleGit.classList.add('active');
+      }
+    };
+    btnToggleGit.addEventListener('click', window.toggleGitPanel);
+    btnCloseGit.addEventListener('click', window.toggleGitPanel);
+
+    // 4. 搜索浮窗
+    const searchHud = document.getElementById('search-hud');
+    const btnSearch = document.getElementById('btn-search');
+    const btnCloseSearch = document.getElementById('btn-close-search');
+    const searchInput = document.getElementById('search-input');
+
+    window.toggleSearch = function() {
+      const show = !searchHud.classList.contains('show');
+      searchHud.classList.toggle('show', show);
+      btnSearch.classList.toggle('active', show);
+      if (show) {
+        setTimeout(() => searchInput.focus(), 50);
+      }
+    };
+    btnSearch.addEventListener('click', window.toggleSearch);
+    btnCloseSearch.addEventListener('click', window.toggleSearch);
+
+    // 5. 代理弹窗
+    const proxyPopover = document.getElementById('proxy-popover');
+    const btnProxy = document.getElementById('btn-proxy');
+    const backdrop = document.getElementById('popover-backdrop');
+
+    btnProxy.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const show = !proxyPopover.classList.contains('show');
+      closeAllPopovers();
+      if (show) {
+        proxyPopover.classList.add('show');
+        backdrop.classList.add('show');
+      }
+    });
+
+    // 6. 环境信息弹窗
+    const envPopover = document.getElementById('env-popover');
+    const btnEnv = document.getElementById('btn-env');
+
+    btnEnv.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const show = !envPopover.classList.contains('show');
+      closeAllPopovers();
+      if (show) {
+        envPopover.classList.add('show');
+        backdrop.classList.add('show');
+      }
+    });
+
+    function closeAllPopovers() {
+      proxyPopover.classList.remove('show');
+      envPopover.classList.remove('show');
+      backdrop.classList.remove('show');
+    }
+    backdrop.addEventListener('click', closeAllPopovers);
+
+    // 7. 对比弹窗
+    window.openCompareModal = function() {
+      document.getElementById('compare-modal').classList.add('show');
+    };
+    window.closeCompareModal = function() {
+      document.getElementById('compare-modal').classList.remove('show');
+    };
+
+    // 8. 键盘快捷键监听
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        searchHud.classList.remove('show');
+        btnSearch.classList.remove('active');
+        closeAllPopovers();
+        closeCompareModal();
+      }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        toggleSearch();
+      }
+    });
+  </script>
+</body>
+</html>

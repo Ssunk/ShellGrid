@@ -424,8 +424,8 @@
     <div class="toolbar-group">
       <button class="toolbar-button" title="打开文件夹作为工作区" on:click={() => void chooseWorkspaceFolder()}><FolderOpen size={16} />打开文件夹</button>
       <button class:active={showGit} class="toolbar-button" title="切换 Git 源码管理" on:click={() => (showGit = !showGit)}><GitBranch size={16} />源码管理</button>
-      <button class="toolbar-button" title="左右分割 (Ctrl+Shift+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割</button>
-      <button class="toolbar-button" title="上下分割 (Ctrl+Shift+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割</button>
+      <button class="toolbar-button" title="左右分割 (Ctrl+Shift+H)" on:click={() => createFromToolbar("horizontal")}><Columns2 size={16} />左右分割<kbd>Ctrl+Shift+H</kbd></button>
+      <button class="toolbar-button" title="上下分割 (Ctrl+Shift+V)" on:click={() => createFromToolbar("vertical")}><Rows2 size={16} />上下分割<kbd>Ctrl+Shift+V</kbd></button>
       <button class="toolbar-button" title="保存工作区" on:click={() => void persist()}><Save size={16} />保存</button>
     </div>
     <div class="toolbar-spacer"></div>
@@ -498,10 +498,13 @@
   {#if showProxy}
     <aside class="environment-popover proxy-popover">
       <div class="popover-title">网络代理</div>
-      <label class="proxy-toggle">
-        <input type="checkbox" bind:checked={proxyDraft.enabled} on:change={applyProxyDraft} />
+      <div class="proxy-toggle">
         <span>为新建终端启用代理</span>
-      </label>
+        <label class="switch">
+          <input type="checkbox" bind:checked={proxyDraft.enabled} on:change={applyProxyDraft} />
+          <span class="slider"></span>
+        </label>
+      </div>
       <label class="proxy-field">
         <span>代理地址</span>
         <input type="text" placeholder="http://127.0.0.1:7890" spellcheck="false" bind:value={proxyDraft.url} on:change={applyProxyDraft} />
