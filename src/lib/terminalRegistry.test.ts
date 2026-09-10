@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_THEME, getTheme } from "./themes";
 
 class TerminalMock {
   cols = 80;
@@ -78,8 +79,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  const { disposeTerminal } = await import("./terminalRegistry");
-  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane", "copy-pane", "paste-pane", "fit-one", "fit-two"]) disposeTerminal(id);
+  const { disposeTerminal, setTerminalTheme } = await import("./terminalRegistry");
+  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane", "copy-pane", "paste-pane", "fit-one", "fit-two", "theme-one", "theme-two", "theme-new"]) disposeTerminal(id);
+  setTerminalTheme(getTheme(DEFAULT_THEME).terminal);
   document.body.replaceChildren();
   Reflect.deleteProperty(window, "shellgrid");
   vi.useRealTimers();
@@ -87,6 +89,33 @@ afterEach(async () => {
 });
 
 describe("terminal registry", () => {
+  it("recolors every existing and future pane without resetting terminals or interrupting pending writes", async () => {
+    const { getTerminal, setTerminalTheme, writeTerminal } = await import("./terminalRegistry");
+    const entries = ["theme-one", "theme-two"].map((id) => getTerminal(id, makeCallbacks() as never));
+    const consumed = vi.fn();
+    writeTerminal("theme-one", "pending output", consumed);
+    const palette = getTheme("rose").terminal;
+
+    setTerminalTheme(palette);
+
+    for (const [index, entry] of entries.entries()) {
+      expect(getTerminal(["theme-one", "theme-two"][index], makeCallbacks() as never)).toBe(entry);
+      expect(entry.terminal.options.theme).toEqual(palette);
+      expect(entry.terminal.options.theme).not.toBe(palette);
+      expect(entry.terminal.open).toHaveBeenCalledOnce();
+      expect(entry.terminal.reset).not.toHaveBeenCalled();
+      expect(entry.terminal.dispose).not.toHaveBeenCalled();
+    }
+    expect(consumed).not.toHaveBeenCalled();
+    (entries[0].terminal as unknown as TerminalMock).write.mock.calls[0][1]();
+    expect(consumed).toHaveBeenCalledOnce();
+
+    const added = getTerminal("theme-new", makeCallbacks() as never);
+    expect(added.terminal.options.theme).toEqual(palette);
+    setTerminalTheme(getTheme(DEFAULT_THEME).terminal);
+    for (const entry of [...entries, added]) expect(entry.terminal.options.theme).toEqual(getTheme(DEFAULT_THEME).terminal);
+  });
+
   it("forwards legacy binary input independently of text input", async () => {
     const { getTerminal } = await import("./terminalRegistry");
     const onBinaryInput = vi.fn(), onInput = vi.fn();

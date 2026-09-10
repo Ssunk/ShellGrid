@@ -1,14 +1,16 @@
 <script lang="ts">
   import { desktop } from "./lib/desktop";
   import { onMount, setContext } from "svelte";
-  import { Check, ChevronDown, ChevronUp, Columns2, Download, FolderOpen, GitBranch, Globe, Info, Palette, Rows2, Save, Search, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Columns2, Download, FolderOpen, GitBranch, Globe, Info, Palette, Rows2, Save, Search, ShieldAlert, SquareTerminal, X } from "lucide-svelte";
   import GitPanel from "./components/GitPanel.svelte";
   import LayoutNode from "./components/LayoutNode.svelte";
+  import ThemePicker from "./components/ThemePicker.svelte";
   import { APP_CONTEXT, type AppController } from "./lib/appContext";
   import { closePane, makePaneLaunch, MAX_PANES, paneIds, splitPane, updateRatio } from "./lib/layout";
   import { isValidProxyUrl, normalizeProxyUrl, sessionProxy } from "./lib/proxy";
   import { TerminalClient } from "./lib/terminalClient";
-  import { disposeTerminal, drainTerminal, fitTerminal, focusTerminal, getTerminal, resetTerminal, searchInTerminal, terminalSize } from "./lib/terminalRegistry";
+  import { disposeTerminal, drainTerminal, fitTerminal, focusTerminal, getTerminal, resetTerminal, searchInTerminal, setTerminalTheme, terminalSize } from "./lib/terminalRegistry";
+  import { applyInterfaceTheme, DEFAULT_THEME, getTheme, readTheme, saveTheme, type ThemeId } from "./lib/themes";
   import { checkForUpdate, type UpdateInfo } from "./lib/update";
   import type { EnvironmentStatus, ProxyConfig, SessionState, WorkspaceStateV1 } from "./lib/types";
 
@@ -38,17 +40,8 @@
   let showInfo = false;
   let showProxy = false;
   let showGit = false;
-  type ThemeId = "emerald" | "cyan" | "violet" | "amber";
-  const THEME_STORAGE_KEY = "shellgrid-theme";
-  let currentTheme: ThemeId = "emerald";
+  let currentTheme: ThemeId = DEFAULT_THEME;
   let showTheme = false;
-
-  const themes: { id: ThemeId; name: string; desc: string; color: string }[] = [
-    { id: "emerald", name: "翡翠青绿", desc: "极客科技 · 护眼默认", color: "#10b981" },
-    { id: "cyan", name: "极客冰蓝", desc: "清爽冷峻 · 云原生风", color: "#0ea5e9" },
-    { id: "violet", name: "霓虹紫珀", desc: "先锋前卫 · 赛博潮流", color: "#8b5cf6" },
-    { id: "amber", name: "琥珀暖金", desc: "复古经典 · 温暖沉静", color: "#f59e0b" },
-  ];
   let proxyDraft: ProxyConfig = { enabled: false, url: "", noProxy: "" };
   let appVersion = "";
   let updateInfo: UpdateInfo | null = null;
@@ -119,6 +112,8 @@
   setContext(APP_CONTEXT, controller);
 
   onMount(() => {
+    currentTheme = readTheme();
+    applyTheme(currentTheme);
     void initialize();
     return () => {
       unlistenClose?.();
@@ -136,11 +131,6 @@
       environment = boot.environment;
       activePaneId = paneIds(workspace.layout)[0];
       appVersion = boot.appVersion;
-      const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-      if (savedTheme === "emerald" || savedTheme === "cyan" || savedTheme === "violet" || savedTheme === "amber") {
-        currentTheme = savedTheme;
-      }
-      applyTheme(currentTheme);
       unlistenClose = desktop().onWorkspaceRequest(() => {
         window.clearTimeout(saveTimer);
         return workspace;
@@ -323,13 +313,14 @@
   }
 
   function applyTheme(theme: ThemeId): void {
-    document.documentElement.setAttribute("data-theme", theme);
+    applyInterfaceTheme(theme);
+    setTerminalTheme(getTheme(theme).terminal);
   }
 
   function selectTheme(theme: ThemeId): void {
     currentTheme = theme;
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
     applyTheme(theme);
+    saveTheme(theme);
   }
 
   function toggleTheme(): void {
@@ -476,7 +467,7 @@
     <span class="pane-count">{paneIds(workspace.layout).length} / {MAX_PANES} 窗格</span>
     <span class:dirty={saveState !== "saved"} class="save-indicator">{saveState === "saved" ? "已保存" : saveState === "saving" ? "保存中" : "待保存"}</span>
     <button class="icon-button toolbar-search" title="搜索终端输出 (Ctrl+Shift+F)" on:click={toggleSearch}><Search size={17} /></button>
-    <button class="icon-button toolbar-theme" class:active={showTheme} title="切换主题风格" on:click={toggleTheme}><Palette size={17} /></button>
+    <button class="icon-button toolbar-theme" class:active={showTheme} title="切换主题风格" aria-label="切换主题风格" aria-expanded={showTheme} aria-controls="theme-picker" on:click={toggleTheme}><Palette size={17} /></button>
     <button class="icon-button toolbar-proxy" class:proxy-on={Boolean(workspace.proxy?.enabled)} title={workspace.proxy?.enabled ? "网络代理（已启用）" : "网络代理"} on:click={toggleProxy}><Globe size={17} /></button>
     <button class="icon-button toolbar-info" title="运行环境" on:click={toggleInfo}><Info size={17} /></button>
   </header>
@@ -517,30 +508,7 @@
   {/if}
 
   {#if showTheme}
-    <aside class="environment-popover theme-popover">
-      <div class="popover-title">
-        <span>主题风格</span>
-        <span class="theme-current-badge">{themes.find((t) => t.id === currentTheme)?.name ?? "默认"}</span>
-      </div>
-      <div class="theme-grid">
-        {#each themes as item}
-          <button
-            class="theme-card"
-            class:active={currentTheme === item.id}
-            on:click={() => selectTheme(item.id)}
-          >
-            <span class="theme-color-preview" style:background={item.color} style:box-shadow={`0 0 8px ${item.color}88`}></span>
-            <div class="theme-card-info">
-              <strong>{item.name}</strong>
-              <small>{item.desc}</small>
-            </div>
-            {#if currentTheme === item.id}
-              <Check size={14} class="theme-check" />
-            {/if}
-          </button>
-        {/each}
-      </div>
-    </aside>
+    <ThemePicker {currentTheme} onSelect={selectTheme} onClose={() => (showTheme = false)} />
   {/if}
 
   {#if showInfo}

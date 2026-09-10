@@ -6,6 +6,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import { DEFAULT_THEME, getTheme, type TerminalTheme } from "./themes";
 
 export interface RegisteredTerminal {
   terminal: Terminal;
@@ -35,6 +36,13 @@ let fitFrame: number | undefined;
 let webglContexts = 0;
 const MAX_WEBGL_CONTEXTS = 4;
 let windowsPty: ConnectionInfo["windowsPty"] | undefined;
+let terminalTheme: TerminalTheme = getTheme(DEFAULT_THEME).terminal;
+
+/** Recolor existing xterms in place and use the same palette for future panes. */
+export function setTerminalTheme(theme: TerminalTheme): void {
+  terminalTheme = { ...theme };
+  for (const entry of terminals.values()) entry.terminal.options.theme = { ...terminalTheme };
+}
 
 export function configureTerminals(value: ConnectionInfo["windowsPty"]): void {
   windowsPty = value;
@@ -83,29 +91,7 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
     lineHeight: 1.15,
     letterSpacing: 0,
     scrollback: 10_000,
-    theme: {
-      background: "#111417",
-      foreground: "#d6d9dc",
-      cursor: "#8bd5a5",
-      cursorAccent: "#111417",
-      selectionBackground: "#3b5e4a99",
-      black: "#15191d",
-      red: "#e06c75",
-      green: "#8bd5a5",
-      yellow: "#e5c07b",
-      blue: "#74a7d8",
-      magenta: "#c792c7",
-      cyan: "#70c0ba",
-      white: "#d6d9dc",
-      brightBlack: "#66717b",
-      brightRed: "#f07f88",
-      brightGreen: "#a4e3b9",
-      brightYellow: "#f0cf8d",
-      brightBlue: "#8dbce8",
-      brightMagenta: "#dda7dd",
-      brightCyan: "#88d6cf",
-      brightWhite: "#f2f4f5",
-    },
+    theme: { ...terminalTheme },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
