@@ -138,9 +138,12 @@ export class TerminalClient {
         session.pendingWrites--;
         if (this.panesBySession.get(session.id) !== session || this.info?.generation !== event.generation) return;
         session.consumed += event.data.length;
-        while (session.consumed >= ACK_CHARS) {
-          this.send({ type: "ack", generation: event.generation, sessionId: session.id, chars: ACK_CHARS });
-          session.consumed -= ACK_CHARS;
+        if (session.consumed >= ACK_CHARS) {
+          // A single parsed batch can cross many ACK thresholds. Return the
+          // same credit in one bridge call, keeping the partial block for later.
+          const chars = session.consumed - session.consumed % ACK_CHARS;
+          this.send({ type: "ack", generation: event.generation, sessionId: session.id, chars });
+          session.consumed -= chars;
         }
         this.finishExit(session);
       });

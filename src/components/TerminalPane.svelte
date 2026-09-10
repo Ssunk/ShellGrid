@@ -10,13 +10,9 @@
   export let session: SessionState | undefined;
   const app = getContext<AppController>(APP_CONTEXT);
   let host: HTMLDivElement;
-  let observer: ResizeObserver;
 
   onMount(() => {
     app.mountTerminal(paneId, host);
-    observer = new ResizeObserver(() => app.resizeTerminal(paneId));
-    observer.observe(host);
-    return () => observer.disconnect();
   });
 </script>
 

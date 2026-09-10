@@ -32,6 +32,8 @@ npm run dev
 
 该命令启动完整桌面应用，前端支持 Vite HMR；修改主进程、preload 或 PTY Host 后重启命令。`npm run dev:web` 只预览界面。
 
+`npm run dev -- --test` 使用可见窗口和临时工作区执行开发环境 UI 回归，结束后自动退出。开发文件监控排除测试数据和构建产物目录。
+
 ## 验证与构建
 
 ```powershell
@@ -46,6 +48,8 @@ npm run test:installers
 ```
 
 EXE/MSI 在 `release` 目录，免安装测试目录在 `release\win-unpacked`。Windows 测试和基准使用隔离数据目录，结果写入 artifacts；指标定义和验收边界见[验证记录](docs/electron-verification.md)。版本标签触发 CI 检查、安装包构建和 Release 草稿。
+
+观察实际窗口时，使用 `npm run test:windows -- --visible` 和 `npm run bench:windows -- --visible`，报告分别为 `windows-verification-visible.json` 和 `windows-benchmark-visible.json`。性能测量使用生产构建，并与其他测试分开运行。
 
 安装器测试会在临时目录实际安装、升级和卸载；为保护已有安装，仅在本机没有 ShellGrid 产品和快捷方式时运行。
 

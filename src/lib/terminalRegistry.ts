@@ -11,7 +11,7 @@ export interface RegisteredTerminal {
   terminal: Terminal;
   fit: FitAddon;
   container: HTMLDivElement;
-  attach(host: HTMLElement): void;
+  attach(host: HTMLElement, afterFit?: () => void): void;
   setFocused(focused: boolean): void;
 }
 
@@ -28,6 +28,10 @@ interface RegistryCallbacks {
 const terminals = new Map<string, RegisteredTerminal>();
 const renderers = new Map<string, { webgl: boolean }>();
 const searches = new Map<string, SearchAddon>();
+const pendingFits = new Map<string, { entry: RegisteredTerminal; afterFit?: () => void }>();
+const observedPanes = new WeakMap<Element, string>();
+let resizeObserver: ResizeObserver | undefined;
+let fitFrame: number | undefined;
 let webglContexts = 0;
 const MAX_WEBGL_CONTEXTS = 4;
 let windowsPty: ConnectionInfo["windowsPty"] | undefined;
@@ -159,11 +163,9 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
     terminal,
     fit,
     container,
-    attach(host) {
+    attach(host, afterFit) {
       if (container.parentElement !== host) host.append(container);
-      requestAnimationFrame(() => {
-        try { fit.fit(); } catch { /* hidden while the split tree settles */ }
-      });
+      scheduleFitTerminal(paneId, afterFit);
     },
     setFocused(focused) {
       if (focused) terminal.focus();
@@ -171,6 +173,20 @@ export function getTerminal(paneId: string, callbacks: RegistryCallbacks): Regis
   };
   terminals.set(paneId, registered);
   renderers.set(paneId, renderer);
+  observedPanes.set(container, paneId);
+  resizeObserver ??= new ResizeObserver((entries) => {
+    for (const { target } of entries) {
+      const id = observedPanes.get(target);
+      const entry = id === undefined ? undefined : terminals.get(id);
+      if (id !== undefined && entry) {
+        pendingFits.set(id, { entry, afterFit: pendingFits.get(id)?.afterFit });
+      }
+    }
+    // One observer delivers every changed pane together, so a divider update
+    // can measure and resize them in this frame without another frame of lag.
+    flushTerminalFits();
+  });
+  resizeObserver.observe(container);
   return registered;
 }
 
@@ -190,8 +206,42 @@ export function drainTerminal(paneId: string): Promise<void> {
 
 export function fitTerminal(paneId: string): void {
   const entry = terminals.get(paneId);
-  if (!entry || !entry.container.isConnected) return;
-  try { entry.fit.fit(); } catch { /* zero-size during a tree update */ }
+  if (entry) applyTerminalSize(entry, measureTerminal(entry));
+}
+
+function measureTerminal(entry: RegisteredTerminal): ReturnType<FitAddon["proposeDimensions"]> {
+  if (!entry.container.isConnected) return;
+  try { return entry.fit.proposeDimensions(); } catch { /* hidden during a tree update */ }
+}
+
+function applyTerminalSize(entry: RegisteredTerminal, size: ReturnType<FitAddon["proposeDimensions"]>): void {
+  if (!size || !Number.isFinite(size.cols) || !Number.isFinite(size.rows)) return;
+  if (entry.terminal.cols === size.cols && entry.terminal.rows === size.rows) return;
+  try { entry.terminal.resize(size.cols, size.rows); } catch { /* disposed during a tree update */ }
+}
+
+/** Coalesce mounts; the shared observer handles subsequent size changes before paint. */
+function scheduleFitTerminal(paneId: string, afterFit?: () => void): void {
+  const entry = terminals.get(paneId);
+  if (!entry) return;
+  pendingFits.set(paneId, { entry, afterFit: afterFit ?? pendingFits.get(paneId)?.afterFit });
+  if (fitFrame !== undefined) return;
+  fitFrame = requestAnimationFrame(flushTerminalFits);
+}
+
+function flushTerminalFits(): void {
+  if (fitFrame !== undefined) cancelAnimationFrame(fitFrame);
+  fitFrame = undefined;
+  const pending = [...pendingFits];
+  pendingFits.clear();
+  // FitAddon.fit interleaves computed-style reads and resize writes. Its
+  // public measurement API lets all panes share one layout read phase.
+  const measured = pending.map(([id, fit]) => ({ id, ...fit, size: measureTerminal(fit.entry) }));
+  for (const { id, entry, size, afterFit } of measured) {
+    if (terminals.get(id) !== entry || !entry.container.isConnected) continue;
+    applyTerminalSize(entry, size);
+    afterFit?.();
+  }
 }
 
 /** 把键盘焦点交给指定窗格的 xterm；实例不存在或不可见时静默失败。 */
@@ -234,9 +284,20 @@ export function searchInTerminal(paneId: string, query: string, direction: "next
 export function disposeTerminal(paneId: string): void {
   const entry = terminals.get(paneId);
   if (!entry) return;
+  pendingFits.delete(paneId);
+  if (!pendingFits.size && fitFrame !== undefined) {
+    cancelAnimationFrame(fitFrame);
+    fitFrame = undefined;
+  }
+  resizeObserver?.unobserve(entry.container);
+  observedPanes.delete(entry.container);
   entry.terminal.dispose();
   entry.container.remove();
   terminals.delete(paneId);
+  if (!terminals.size) {
+    resizeObserver?.disconnect();
+    resizeObserver = undefined;
+  }
   searches.delete(paneId);
   const renderer = renderers.get(paneId);
   renderers.delete(paneId);

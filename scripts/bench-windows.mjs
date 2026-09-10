@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { root } from "./run.mjs";
 
 if (process.platform !== "win32" || process.arch !== "x64") throw new Error("Windows x64 is required");
+const visible = process.argv.includes("--visible");
 const directory = join(root, "artifacts", "benchmark-" + Date.now());
 await mkdir(directory, { recursive: true });
 const script = join(directory, "benchmark.cjs");
@@ -16,9 +17,10 @@ for (const panes of [1, 4, 16]) {
   const sampleDirectory = join(directory, String(panes));
   await mkdir(sampleDirectory);
   const env = { ...process.env, LOCALAPPDATA: join(sampleDirectory, "localappdata"),
-    SHELLGRID_TEST_DIRECTORY: sampleDirectory, SHELLGRID_BENCH_PANES: String(panes) };
+    SHELLGRID_TEST_DIRECTORY: sampleDirectory, SHELLGRID_BENCH_PANES: String(panes),
+    SHELLGRID_TEST_VISIBLE: visible ? "1" : "0" };
   delete env.ELECTRON_RUN_AS_NODE; delete env.SHELLGRID_DEV_URL;
-  const child = spawn(electron, [script], { cwd: root, env, stdio: "ignore", windowsHide: true });
+  const child = spawn(electron, [script], { cwd: root, env, stdio: "ignore", windowsHide: !visible });
   const timeout = setTimeout(() => child.kill(), 150_000);
   const code = await new Promise((resolve, reject) => { child.once("exit", resolve); child.once("error", reject); });
   clearTimeout(timeout);
@@ -26,5 +28,6 @@ for (const panes of [1, 4, 16]) {
   results.push(JSON.parse(await readFile(join(sampleDirectory, "benchmark.json"), "utf8")));
   console.log("Measured " + panes + " panes");
 }
-await writeFile(join(root, "artifacts", "windows-benchmark.json"), JSON.stringify({ date: new Date().toISOString(), results }, null, 2));
-console.log("Report: artifacts/windows-benchmark.json");
+const reportName = visible ? "windows-benchmark-visible.json" : "windows-benchmark.json";
+await writeFile(join(root, "artifacts", reportName), JSON.stringify({ date: new Date().toISOString(), results }, null, 2));
+console.log("Report: artifacts/" + reportName);

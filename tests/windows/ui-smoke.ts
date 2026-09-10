@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { alive, check, delay, pwsh, until } from "./helpers";
 
 const directory = process.env.SHELLGRID_TEST_DIRECTORY!;
+const visible = process.env.SHELLGRID_TEST_VISIBLE === "1";
 const dataDirectory = join(process.env.LOCALAPPDATA!, "ShellGrid");
 const workspacePath = join(dataDirectory, "workspace.json");
 const results: string[] = [];
@@ -17,7 +18,7 @@ const timeout = setTimeout(() => { void fail(new Error("UI verification timeout"
 async function fail(error: unknown) {
   if (finished) return;
   finished = true; clearTimeout(timeout);
-  await writeFile(reportPath, JSON.stringify({ passed: results, error: error instanceof Error ? error.message : "UI verification failed" }, null, 2));
+  await writeFile(reportPath, JSON.stringify({ visible, passed: results, error: error instanceof Error ? error.message : "UI verification failed" }, null, 2));
   app.exit(1);
 }
 async function evaluate<T>(script: string): Promise<T> {
@@ -29,6 +30,30 @@ async function running(count: number) {
 async function collectPids() {
   for (const pid of await evaluate<number[]>("window.__sgCreated.map(e => e.shellPid)")) shellPids.add(pid);
 }
+async function consoleSize(marker: string): Promise<{ cols: number; rows: number }> {
+  await evaluate("document.querySelectorAll('.terminal-surface textarea')[1].focus();true");
+  await currentWindow!.webContents.insertText("[Console]::Write(('SG'+'" + marker + "')+[Console]::WindowWidth+','+[Console]::WindowHeight+';')");
+  currentWindow!.webContents.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+  currentWindow!.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+  const query = "(()=>{const m=window.__sgText.match(/SG" + marker + "(\\d+),(\\d+);/);return m?{cols:Number(m[1]),rows:Number(m[2])}:null})()";
+  await until(() => evaluate<boolean>("Boolean(" + query + ")"), "ConPTY dimensions after UI resize");
+  return evaluate(query);
+}
+async function dragDivider(ratio: number): Promise<void> {
+  const bounds = await evaluate<{ x: number; y: number; target: number }>(`(() => {
+    const divider = document.querySelector('.workspace > .split-root > .divider');
+    const rect = divider.getBoundingClientRect();
+    const parent = divider.parentElement.getBoundingClientRect();
+    return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), target: Math.round(parent.x + parent.width * ${ratio}) };
+  })()`);
+  const contents = currentWindow!.webContents;
+  contents.sendInputEvent({ type: "mouseMove", x: bounds.x, y: bounds.y });
+  contents.sendInputEvent({ type: "mouseDown", x: bounds.x, y: bounds.y, button: "left", clickCount: 1 });
+  contents.sendInputEvent({ type: "mouseMove", x: bounds.target, y: bounds.y, modifiers: ["leftbuttondown"] });
+  contents.sendInputEvent({ type: "mouseUp", x: bounds.target, y: bounds.y, button: "left", clickCount: 1 });
+  await until(() => evaluate<boolean>("Math.abs(parseFloat(document.querySelector('.workspace > .split-root > .split-child').style.flexBasis)/100-" + ratio + ")<0.002"), "final divider ratio");
+  await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+}
 async function test() {
   await mkdir(dataDirectory, { recursive: true });
   const shell = await pwsh();
@@ -38,7 +63,7 @@ async function test() {
     proxy: { enabled: true, url: "broken proxy" },
   }));
   // These hooks exist only in the external verification harness, never in the app.
-  BrowserWindow.prototype.show = function () {};
+  if (!visible) BrowserWindow.prototype.show = function () {};
   dialog.showMessageBox = (async () => {
     prompts++;
     return { response: answers.shift() ?? 0, checkboxChecked: false };
@@ -51,7 +76,9 @@ async function test() {
   } else require(resolve("dist-electron/main.cjs"));
   await until(() => BrowserWindow.getAllWindows().length > 0, "main window");
   currentWindow = BrowserWindow.getAllWindows()[0];
+  if (visible) await until(() => currentWindow!.isVisible(), "visible UI test window");
   await until(() => evaluate<boolean>("Boolean(window.shellgrid && document.querySelector('.terminal-pane'))").catch(() => false), "sandboxed renderer bootstrap");
+  if (visible) check(await evaluate("document.visibilityState === 'visible'"), "UI test renderer is hidden");
   await running(1);
   check(await evaluate("window.shellgrid !== undefined"), "Sandbox preload did not load");
   check(await evaluate("typeof window.require === 'undefined' && typeof window.process === 'undefined'"), "Node globals escaped the preload");
@@ -72,7 +99,18 @@ async function test() {
   currentWindow.webContents.setZoomLevel(0);
   currentWindow.setSize(1280, 800);
   await delay(150);
+  await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
   check(await evaluate("Array.from(document.querySelectorAll('.terminal-surface')).includes(window.__sgFirst)"), "Zoom/resize rebuilt xterm");
+  const initialSize = await consoleSize("INITIALSIZE");
+  await dragDivider(0.65);
+  const smallerSize = await consoleSize("SMALLERSIZE");
+  check(smallerSize.cols < initialSize.cols && smallerSize.rows === initialSize.rows,
+    `Divider resize did not reach ConPTY (${initialSize.cols}x${initialSize.rows} -> ${smallerSize.cols}x${smallerSize.rows})`);
+  await dragDivider(0.5);
+  const restoredSize = await consoleSize("RESTOREDSIZE");
+  check(restoredSize.cols === initialSize.cols && restoredSize.rows === initialSize.rows, "Final divider dimensions were not restored");
+  check(await evaluate("Array.from(document.querySelectorAll('.terminal-surface')).includes(window.__sgFirst)"), "Divider drag rebuilt xterm");
+  results.push("divider release commits final ratio, resizes real ConPTY and preserves xterm");
   // Real xterm onData -> preload -> MessagePort -> ConPTY -> renderer.
   await evaluate("document.querySelectorAll('.terminal-surface textarea')[1].focus();true");
   await currentWindow.webContents.insertText("[Console]::Write(('UI'+'-输入成功'))");
@@ -122,7 +160,7 @@ async function test() {
       await until(() => [...shellPids].every((pid) => !alive(pid)), "final close process cleanup");
       results.push("confirmed window close saves latest layout and reaps sessions without recursion");
       finished = true; clearTimeout(timeout);
-      await writeFile(reportPath, JSON.stringify({ passed: results }, null, 2));
+      await writeFile(reportPath, JSON.stringify({ visible, passed: results }, null, 2));
       app.exit(0);
     })().catch(fail);
   });

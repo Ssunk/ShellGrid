@@ -11,5 +11,4 @@ export interface AppController {
   restart(paneId: string): void;
   updateRatio(path: string, ratio: number): void;
   mountTerminal(paneId: string, host: HTMLElement): void;
-  resizeTerminal(paneId: string): void;
 }

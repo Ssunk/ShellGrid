@@ -30,4 +30,16 @@ describe("layout tree", () => {
     expect(paneIds(tree)).toHaveLength(16);
   });
 
+  it("preserves the tree for unchanged or clamped ratios and stale paths", () => {
+    const split = splitPane(root, "one", "two", "horizontal");
+    const tree = splitPane(split, "two", "three", "vertical");
+    expect(updateRatio(tree, "1", 0.5)).toBe(tree);
+    expect(updateRatio(tree, "00", 0.7)).toBe(tree);
+    expect(updateRatio(tree, "1x", 0.7)).toBe(tree);
+    const limited = updateRatio(tree, "1", 1);
+    expect(updateRatio(limited, "1", 2)).toBe(limited);
+    if (limited.type !== "split" || tree.type !== "split") throw new Error("Expected split layouts");
+    expect(limited.first).toBe(tree.first);
+  });
+
 });

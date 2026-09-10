@@ -1,6 +1,6 @@
 # Electron Windows 验证记录
 
-本页记录 0.3.1 的 Electron + node-pty 终端验证结果、复现入口和验收边界。日期使用北京时间（UTC+8）；JSON 报告中的日期使用 UTC。`artifacts` 已被 Git 忽略，原始报告保留在执行测试的机器或 CI artifact 中。
+本页记录 Electron + node-pty 终端的验证结果、复现入口和验收边界。日期使用北京时间（UTC+8）；JSON 报告中的日期使用 UTC。`artifacts` 已被 Git 忽略，原始报告保留在执行测试的机器或 CI artifact 中。
 
 ## 本轮基础检查
 
@@ -43,7 +43,7 @@ npm run test:windows
 
 脚本把 `LOCALAPPDATA` 指向独立测试目录。测试报告只保存结果、计数、PID 和资源指标，不保存终端内容。
 
-UI 自动化使用真实的隐藏窗口，并由测试代码选择确认对话框的回答。中文输入通过 `webContents.insertText` 注入；系统输入法的候选、组合和提交过程仍需人工验收。
+UI 自动化默认使用真实的隐藏窗口；`npm run test:windows -- --visible` 使用可见窗口，报告写入 `artifacts\windows-verification-visible.json`。开发环境可运行 `npm run dev -- --test`，由 `scripts\dev.mjs` 启动 Vite 和可见 Electron 测试窗口，报告位于 `artifacts\dev-ui-<时间戳>\ui-report.json`。两种入口都使用隔离工作区，由测试代码选择确认对话框的回答。中文输入通过 `webContents.insertText` 注入；系统输入法的候选、组合和提交过程仍需人工验收。
 
 可单独运行 `node scripts\test-windows.mjs --host-only` 或 `node scripts\test-windows.mjs --ui-only`。Host-only 会覆盖汇总报告，但其中不含 UI 结果；UI-only 仅输出本次目录内的 `ui-report.json`。判断完整回归是否通过时需检查报告包含 `host` 和 `ui`。
 
@@ -76,6 +76,8 @@ npm run bench:windows
 
 [基准入口](../scripts/bench-windows.mjs) 依次测量 1、4、16 个窗格，写入 `artifacts\windows-benchmark.json`；[测量实现](../tests/windows/benchmark.ts) 使用 Electron Release 运行时、Vite 生产资源和直接 node-pty ConPTY。
 
+追加 `-- --visible` 使用可见窗口，报告写入 `artifacts\windows-benchmark-visible.json`，每个样本的 `windowMode` 标明可见性。启动后检查窗口实际可见及 `document.visibilityState`，再开始测量。Shell 使用固定长度名称的临时 cwd，避免不同检出路径改变提示符长度；退出后删除该空目录。
+
 以下数据来自本轮 2026-09-06 23:05 的 direct node-pty ConPTY 报告。机器与运行条件：
 
 | 项目 | 记录 |
@@ -104,6 +106,38 @@ npm run bench:windows
 - 原始报告中的 Electron CPU 为进程百分比之和；PTY CPU 为 CIM 用户态与内核态累计秒数，`ptyCpuSecondsDelta` 是输出阶段消耗的 CPU 秒数，不能当作 CPU 百分比或峰值。
 
 隐藏窗口、合成命令和 `-NoProfile` 不覆盖可见窗口的输入到绘制延迟、用户 Profile 开销或 Agent CLI 负载。该样本也没有 Tauri 对照组，不能用于宣称迁移后的性能提升。
+
+## 2026-09-10 多终端效率优化验证
+
+本次优化合并分隔线的逐帧更新，松手时立即提交最终位置；相同或已达边界的比例保持原布局对象，避免重复更新和保存。终端改用一个共享 ResizeObserver，先测量所有变化窗格，再调整 xterm 尺寸，挂载后的会话在完成尺寸测量后创建。关闭窗格时取消待执行任务并释放观察，移动窗格继续复用原 xterm。
+
+输出仍由 Host 按约 5 ms 合并并顺序送入 xterm。消费回调中跨越多个 5,000 字符 ACK 单位时，用一条消息返还这些额度，不足一个单位的部分继续累计；100,000/5,000 高低水位、尾部退出等待和旧会话隔离保持原语义。
+
+已执行并通过：
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm run check` | Svelte 0 错误、0 警告；Electron TypeScript 通过 |
+| `npm test` | 前端 7 个文件、50 项测试；服务及协议 8 个文件、35 项测试通过 |
+| `npm run build` | 前端和 Electron 完整构建通过，仍有原有 xterm 大分块提示 |
+| `npm run dev -- --test` | 可见开发窗口的 7 组 UI 回归通过 |
+| `npm run test:windows -- --visible` | Host、真实 ConPTY、可见渲染器及关闭流程全部通过 |
+
+新增真实 UI 断言覆盖快速松手后的最终比例、ConPTY 列数随分隔线缩小和恢复、缩放后的尺寸稳定及 xterm 实例保留。Vite 不再监控 `artifacts`、`dist`、`dist-electron` 和 `release`，避免开发测试期间打开的 Chromium 缓存触发 Windows 文件锁错误。
+
+可见性能对照使用修改前的 `6d1403c` 和优化后的生产资源，分别执行三轮，每轮按“修改前 → 修改后”顺序交替，期间不运行其他 ShellGrid 测试。两边使用同一份基准脚本。机器为 Windows 10.0.26200 x64、i5-12600KF、12 个逻辑处理器、15.86 GiB 内存，运行时为 Electron 42.8.1 / Node 24.18.1，node-pty 和 xterm 版本与上表一致。窗口为可见的 1280×800 BrowserWindow，Shell 为 PowerShell `-NoProfile`，未运行 Agent CLI。
+
+每窗格先输出 40,000 行，随后向顶层分隔线请求发送 180 次原生鼠标移动，间隔目标为 8 ms，比例在 35%–65% 间往返并回到 50%。松手后等待 250 ms 和两个动画帧。`dividerDrag` 记录这一阶段的 Chromium 布局计数、布局耗时和 requestAnimationFrame 回调间隔；原生事件可能被合并，实际交付次数单独记录。以下均为三轮中位数，帧间隔一栏为各轮 p95 的中位数：
+
+| 窗格数 | 布局次数，修改前 → 后 | 布局耗时（ms），修改前 → 后 | 帧间隔 p95（ms），修改前 → 后 | 总吞吐（百万字符/s），修改前 → 后 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | — | — | — | 1.78 → 1.85 |
+| 4 | 540 → 291 | 69.3 → 51.8 | 24.2 → 24.2 | 5.32 → 5.36 |
+| 16 | 740 → 196 | 155.9 → 117.7 | 66.7 → 60.5 | 5.06 → 5.09 |
+
+16 窗格实际交付的鼠标移动次数为修改前 97–99 次、修改后 101–105 次；布局次数减少约 74%，布局耗时减少约 25%。输出吞吐在可见窗口下基本持平，不能沿用隐藏窗口样本推断固定的吞吐提升。拖动阶段仍有超过 100 ms 的长帧；回调间隔不是输入到屏幕呈现的延迟。本测试也未覆盖运行 Agent CLI 时一边持续输出一边拖动的负载。
+
+原始对照报告为 `artifacts\windows-benchmark-visible-before-1.json` 至 `-3.json` 和 `artifacts\windows-benchmark-visible-after-1.json` 至 `-3.json`；完整可见回归为 `artifacts\windows-verification-visible.json`。开发模式只用于功能验证，上述性能数据全部来自生产资源。
 
 ## 待人工验收
 

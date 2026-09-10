@@ -48,13 +48,21 @@ export function closePane(node: LayoutNode, targetId: string): LayoutNode | null
 }
 
 export function updateRatio(node: LayoutNode, path: string, ratio: number): LayoutNode {
-  if (node.type === "pane" || path.length === 0) {
-    return node.type === "split" && path.length === 0 ? { ...node, ratio: clampRatio(ratio) } : node;
+  if (node.type === "pane") return node;
+  if (path.length === 0) {
+    const next = clampRatio(ratio);
+    return next === node.ratio ? node : { ...node, ratio: next };
   }
   const branch = path[0];
   const rest = path.slice(1);
-  if (branch === "0") return { ...node, first: updateRatio(node.first, rest, ratio) };
-  if (branch === "1") return { ...node, second: updateRatio(node.second, rest, ratio) };
+  if (branch === "0") {
+    const first = updateRatio(node.first, rest, ratio);
+    return first === node.first ? node : { ...node, first };
+  }
+  if (branch === "1") {
+    const second = updateRatio(node.second, rest, ratio);
+    return second === node.second ? node : { ...node, second };
+  }
   return node;
 }
 

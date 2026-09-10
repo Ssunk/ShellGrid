@@ -81,7 +81,9 @@
     close: (paneId) => close(paneId),
     restart: (paneId) => restartPane(paneId),
     updateRatio: (path, ratio) => {
-      workspace = { ...workspace, layout: updateRatio(workspace.layout, path, ratio) };
+      const layout = updateRatio(workspace.layout, path, ratio);
+      if (layout === workspace.layout) return;
+      workspace = { ...workspace, layout };
       markDirty();
     },
     mountTerminal: (paneId, host) => {
@@ -107,16 +109,11 @@
           searchTotal = total;
         },
       });
-      entry.attach(host);
-      if (paneId === activePaneId) entry.setFocused(true);
-      requestAnimationFrame(() => {
+      entry.attach(host, () => {
         if (!workspace.panes[paneId] || !entry.container.isConnected) return;
-        fitTerminal(paneId);
         void terminalClient?.create(paneId, controller.getLaunch(paneId), entry.terminal.cols, entry.terminal.rows, sessionProxy(workspace.proxy));
       });
-    },
-    resizeTerminal: (paneId) => {
-      fitTerminal(paneId);
+      if (paneId === activePaneId) entry.setFocused(true);
     },
   };
   setContext(APP_CONTEXT, controller);

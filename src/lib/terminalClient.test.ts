@@ -98,6 +98,35 @@ describe("MessagePort terminal client", () => {
     expect(writes).toHaveLength(100);
     expect(writes.map((write) => write.data)).toEqual(Array.from({ length: 100 }, (_, i) => String(i)));
   });
+  it("returns multiple ACK blocks in one message per consumed batch without crediting pending writes", async () => {
+    const { client, bridge, callbacks } = setup();
+    await client.create("pane", launch, 80, 24);
+    const sessionId = created(bridge, bridge.creates()[0]);
+    const acks = () => bridge.send.mock.calls.map(([command]) => command).filter((command) => command.type === "ack");
+    bridge.event({ type: "data", sessionId, data: "🙂".repeat(52_501) });
+    bridge.event({ type: "data", sessionId, data: "x".repeat(4_999) });
+    bridge.event({ type: "exit", sessionId, exitCode: 0 });
+    expect(acks()).toEqual([]);
+    writes[0].done();
+    expect(acks()).toEqual([{ type: "ack", generation: 1, sessionId, chars: 105_000 }]);
+    expect(callbacks.onExit).not.toHaveBeenCalled();
+    writes[1].done();
+    expect(acks().map((ack) => ack.chars)).toEqual([105_000, 5_000, 1]);
+    expect(callbacks.onExit).toHaveBeenCalledWith("pane", 0);
+  });
+  it("discards pending ACK credit when a pane is closed and recreated", async () => {
+    const { client, bridge, callbacks } = setup();
+    await client.create("pane", launch, 80, 24);
+    const oldId = created(bridge, bridge.creates()[0]);
+    bridge.event({ type: "data", sessionId: oldId, data: "x".repeat(110_000) });
+    client.closePane("pane");
+    await client.create("pane", launch, 80, 24);
+    created(bridge, bridge.creates()[1]);
+    writes[0].done();
+    expect(bridge.send.mock.calls.filter(([command]) => command.type === "ack")).toEqual([]);
+    expect(callbacks.onExit).not.toHaveBeenCalled();
+    expect(client.isRunning("pane")).toBe(true);
+  });
   it("retries a failed connection and ignores events and write callbacks from earlier generations", async () => {
     const { client, bridge, callbacks } = setup();
     bridge.connect.mockRejectedValueOnce(new Error("offline"));

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 class TerminalMock {
   cols = 80;
@@ -13,6 +13,7 @@ class TerminalMock {
   onBinary = vi.fn();
   onTitleChange = vi.fn();
   onResize = vi.fn();
+  resize = vi.fn((cols: number, rows: number) => { this.cols = cols; this.rows = rows; });
   focus = vi.fn();
   hasSelection = vi.fn(() => false);
   getSelection = vi.fn(() => "");
@@ -21,6 +22,17 @@ class TerminalMock {
   dispose = vi.fn();
   reset = vi.fn();
   write = vi.fn();
+}
+
+const observers: ResizeObserverMock[] = [];
+class ResizeObserverMock {
+  constructor(readonly callback: ResizeObserverCallback) { observers.push(this); }
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  notify(...targets: Element[]) {
+    this.callback(targets.map((target) => ({ target })) as ResizeObserverEntry[], this);
+  }
 }
 
 interface SearchAddonMock {
@@ -33,7 +45,10 @@ interface SearchAddonMock {
 const { searchInstances } = vi.hoisted(() => ({ searchInstances: [] as SearchAddonMock[] }));
 
 vi.mock("@xterm/xterm", () => ({ Terminal: TerminalMock }));
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit = vi.fn(); } }));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {
+  fit = vi.fn();
+  proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
+} }));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss = vi.fn(); dispose = vi.fn(); } }));
@@ -56,10 +71,19 @@ function makeCallbacks(extra: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+  observers.length = 0;
+});
+
 afterEach(async () => {
   const { disposeTerminal } = await import("./terminalRegistry");
-  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane", "copy-pane", "paste-pane"]) disposeTerminal(id);
+  for (const id of ["stable-pane", "text-pane", "search-pane", "count-pane", "binary-pane", "ack-pane", "link-pane", "copy-pane", "paste-pane", "fit-one", "fit-two"]) disposeTerminal(id);
+  document.body.replaceChildren();
   Reflect.deleteProperty(window, "shellgrid");
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("terminal registry", () => {
@@ -122,6 +146,87 @@ describe("terminal registry", () => {
     expect(secondHost.firstElementChild).toBe(first.container);
     expect(firstHost.childElementCount).toBe(0);
     expect(terminalCount()).toBe(1);
+  });
+
+  it("measures every changed pane before resizing and creates with the fitted dimensions", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const order: string[] = [];
+    const entries = ["fit-one", "fit-two"].map((id, index) => {
+      const entry = getTerminal(id, makeCallbacks() as never);
+      const host = document.createElement("div");
+      document.body.append(host);
+      vi.mocked(entry.fit.proposeDimensions).mockImplementation(() => {
+        order.push("measure " + id);
+        return { cols: 100 + index, rows: 40 };
+      });
+      const terminal = entry.terminal as unknown as TerminalMock;
+      terminal.resize.mockImplementation((cols, rows) => {
+        order.push("resize " + id);
+        terminal.cols = cols;
+        terminal.rows = rows;
+      });
+      const afterFit = vi.fn(() => expect({ cols: terminal.cols, rows: terminal.rows }).toEqual({ cols: 100 + index, rows: 40 }));
+      entry.attach(host, afterFit);
+      return { entry, afterFit };
+    });
+    expect(observers).toHaveLength(1);
+    expect(order).toEqual([]);
+    // Deliver the complete ResizeObserver batch, as Chromium does before paint.
+    observers[0].notify(...entries.map(({ entry }) => entry.container));
+    expect(order).toEqual(["measure fit-one", "measure fit-two", "resize fit-one", "resize fit-two"]);
+    for (const { afterFit } of entries) expect(afterFit).toHaveBeenCalledOnce();
+    vi.advanceTimersToNextFrame();
+    expect(order).toHaveLength(4);
+  });
+
+  it("coalesces rapid remounts and only runs the latest mount callback", async () => {
+    const { getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("fit-one", makeCallbacks() as never);
+    const firstHost = document.createElement("div"), lastHost = document.createElement("div");
+    document.body.append(firstHost, lastHost);
+    const oldMount = vi.fn(), currentMount = vi.fn();
+    entry.attach(firstHost, oldMount);
+    entry.attach(lastHost, currentMount);
+    vi.advanceTimersToNextFrame();
+    expect(entry.container.parentElement).toBe(lastHost);
+    expect(entry.fit.proposeDimensions).toHaveBeenCalledOnce();
+    expect(oldMount).not.toHaveBeenCalled();
+    expect(currentMount).toHaveBeenCalledOnce();
+  });
+
+  it("skips unchanged sizes and disconnected surfaces, then fits a reattached terminal", async () => {
+    const { fitTerminal, getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("fit-one", makeCallbacks() as never);
+    const host = document.createElement("div");
+    document.body.append(host);
+    entry.attach(host);
+    vi.advanceTimersToNextFrame();
+    const terminal = entry.terminal as unknown as TerminalMock;
+    expect(terminal.resize).not.toHaveBeenCalled();
+    entry.container.remove();
+    vi.mocked(entry.fit.proposeDimensions).mockClear().mockReturnValue({ cols: 120, rows: 36 });
+    fitTerminal("fit-one");
+    observers[0].notify(entry.container);
+    expect(entry.fit.proposeDimensions).not.toHaveBeenCalled();
+    entry.attach(host);
+    vi.advanceTimersToNextFrame();
+    expect(terminal.resize).toHaveBeenCalledExactlyOnceWith(120, 36);
+  });
+
+  it("cancels pending mounts and releases observation when the pane is disposed", async () => {
+    const { disposeTerminal, getTerminal } = await import("./terminalRegistry");
+    const entry = getTerminal("fit-one", makeCallbacks() as never);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const afterFit = vi.fn();
+    entry.attach(host, afterFit);
+    disposeTerminal("fit-one");
+    observers[0].notify(entry.container);
+    vi.advanceTimersToNextFrame();
+    expect(entry.fit.proposeDimensions).not.toHaveBeenCalled();
+    expect(afterFit).not.toHaveBeenCalled();
+    expect(observers[0].unobserve).toHaveBeenCalledWith(entry.container);
+    expect(observers[0].disconnect).toHaveBeenCalledOnce();
   });
 
   it("leaves text paste events for xterm", async () => {
